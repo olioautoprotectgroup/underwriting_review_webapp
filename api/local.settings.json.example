@@ -1,0 +1,22 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+
+    "GITHUB_TOKEN": "<fine-grained PAT with Contents: Read and write on this repo>",
+    "GITHUB_OWNER": "olioautoprotectgroup",
+    "GITHUB_REPO": "underwriting_review_webapp",
+    "GITHUB_BRANCH": "main",
+    "GITHUB_DATA_PATH": "api/data/dashboard.json",
+
+    "DATABRICKS_HOST": "https://<your-workspace>.azuredatabricks.net",
+    "DATABRICKS_CLIENT_ID": "<service principal OAuth client id>",
+    "DATABRICKS_CLIENT_SECRET": "<service principal OAuth secret>",
+    "DATABRICKS_WAREHOUSE_ID": "<sql warehouse id>",
+    "DATABRICKS_CATALOG": "sandbox",
+    "DATABRICKS_SCHEMA": "oliver_oakes",
+
+    "DATABRICKS_WRITEBACK_KEY": "<shared secret, also set on the Databricks job>"
+  }
+}

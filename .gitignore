@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.vite/
+api/dist/
+api/local.settings.json
+.env
+.env.local
+*.log
+.DS_Store

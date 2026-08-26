@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
+import { gunzipSync } from "node:zlib";
 import { commitDashboardJson, getCurrentDashboardJson } from "../lib/github";
 import { isAuthorizedWriteback } from "../lib/auth";
 import type { DashboardData } from "../lib/types";
@@ -21,7 +22,14 @@ const FORBIDDEN: HttpResponseInit = {
 export async function putDashboardData(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (!isAuthorizedWriteback(request)) return FORBIDDEN;
 
-  const body = (await request.json()) as DashboardData;
+  let body: DashboardData;
+  const encoding = request.headers.get("content-encoding")?.toLowerCase();
+  if (encoding === "gzip") {
+    const raw = Buffer.from(await request.arrayBuffer());
+    body = JSON.parse(gunzipSync(raw).toString("utf-8")) as DashboardData;
+  } else {
+    body = (await request.json()) as DashboardData;
+  }
   if (!Array.isArray(body.dealers) || !Array.isArray(body.elrCurrent)) {
     return { status: 400, jsonBody: { error: "Malformed dashboard payload" } };
   }

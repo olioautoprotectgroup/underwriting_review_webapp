@@ -11,8 +11,7 @@
     "GITHUB_DATA_PATH": "api/data/dashboard.json",
 
     "DATABRICKS_HOST": "https://<your-workspace>.azuredatabricks.net",
-    "DATABRICKS_CLIENT_ID": "<service principal OAuth client id>",
-    "DATABRICKS_CLIENT_SECRET": "<service principal OAuth secret>",
+    "DATABRICKS_TOKEN": "<personal access token>",
     "DATABRICKS_WAREHOUSE_ID": "<sql warehouse id>",
     "DATABRICKS_CATALOG": "sandbox",
     "DATABRICKS_SCHEMA": "oliver_oakes",

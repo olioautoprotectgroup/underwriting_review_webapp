@@ -3,70 +3,25 @@
  * development plan's "Case write path" section for why cases go straight
  * to Databricks rather than through the git-committed dashboard.json).
  *
- * Auth: OAuth machine-to-machine (client-credentials grant) against a
- * Databricks service principal, not a personal access token — a PAT is
- * tied to a human account and silently breaks if that person's access
- * changes; a service principal is Databricks' documented pattern for an
- * unattended API caller like this Function.
+ * Auth: a personal access token (PAT) under Oliver Oakes' own Databricks
+ * account, used directly as the bearer token on every request — not a
+ * service principal, since creating one requires account/workspace admin
+ * rights this project doesn't have. This is the same accepted tradeoff as
+ * `sandbox.oliver_oakes` elsewhere in this platform (see
+ * `underwriting_reviews/docs/CHANGE_LOG.md`'s "Promote off
+ * sandbox.oliver_oakes" open item): the token is tied to a human account
+ * and will break if that person's access changes or the token is rotated
+ * or revoked. Revisit once proper admin/service-principal access is
+ * available.
  *
- * NOTE: the exact OAuth token-endpoint path below (`/oidc/v1/token`) is the
- * documented Databricks account/workspace OAuth-for-service-principals
- * endpoint at the time this was written. Confirm it against current
- * Databricks docs during deployment setup — this is the one detail in this
- * file worth verifying live rather than trusting as committed.
- *
- * Required app settings: DATABRICKS_HOST, DATABRICKS_CLIENT_ID,
- * DATABRICKS_CLIENT_SECRET, DATABRICKS_WAREHOUSE_ID, DATABRICKS_CATALOG,
- * DATABRICKS_SCHEMA.
+ * Required app settings: DATABRICKS_HOST, DATABRICKS_TOKEN,
+ * DATABRICKS_WAREHOUSE_ID, DATABRICKS_CATALOG, DATABRICKS_SCHEMA.
  */
 
 function requiredEnv(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`Missing required app setting: ${name}`);
   return value;
-}
-
-interface CachedToken {
-  accessToken: string;
-  expiresAt: number; // epoch ms
-}
-
-let cachedToken: CachedToken | null = null;
-
-/** Refresh 60s before actual expiry so a token never goes stale mid-request. */
-const EXPIRY_SAFETY_MARGIN_MS = 60_000;
-
-async function getAccessToken(): Promise<string> {
-  if (cachedToken && cachedToken.expiresAt - EXPIRY_SAFETY_MARGIN_MS > Date.now()) {
-    return cachedToken.accessToken;
-  }
-
-  const host = requiredEnv("DATABRICKS_HOST").replace(/\/$/, "");
-  const clientId = requiredEnv("DATABRICKS_CLIENT_ID");
-  const clientSecret = requiredEnv("DATABRICKS_CLIENT_SECRET");
-
-  const res = await fetch(`${host}/oidc/v1/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: clientId,
-      client_secret: clientSecret,
-      scope: "all-apis",
-    }),
-  });
-
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`Databricks OAuth token request failed (${res.status}): ${body}`);
-  }
-
-  const json = (await res.json()) as { access_token: string; expires_in: number };
-  cachedToken = {
-    accessToken: json.access_token,
-    expiresAt: Date.now() + json.expires_in * 1000,
-  };
-  return cachedToken.accessToken;
 }
 
 export type SqlParamType = "STRING" | "INT" | "DOUBLE" | "BOOLEAN" | "DATE" | "TIMESTAMP";
@@ -102,7 +57,7 @@ export async function executeStatement(
   const warehouseId = requiredEnv("DATABRICKS_WAREHOUSE_ID");
   const catalog = requiredEnv("DATABRICKS_CATALOG");
   const schema = requiredEnv("DATABRICKS_SCHEMA");
-  const token = await getAccessToken();
+  const token = requiredEnv("DATABRICKS_TOKEN");
 
   const submit = async () => {
     const res = await fetch(`${host}/api/2.0/sql/statements`, {

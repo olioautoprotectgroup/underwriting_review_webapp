@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getDashboard, listCases } from "../lib/api";
-import type { CaseWithCurrentState, DashboardData } from "../lib/types";
+import type { CaseWithCurrentState, DashboardSummary } from "../lib/types";
 import RagBadge from "../components/RagBadge";
 
 const RAG_ORDER: Record<string, number> = { Red: 0, Amber: 1, Green: 2, "No status": 3 };
@@ -12,7 +12,7 @@ function formatPercent(value: number | null): string {
 }
 
 export default function Dashboard() {
-  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [cases, setCases] = useState<CaseWithCurrentState[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 

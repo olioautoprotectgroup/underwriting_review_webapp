@@ -37,11 +37,40 @@ export interface ClaimMixEntry {
   paidGbp: number;
 }
 
+/**
+ * The shape of the git-committed api/data/dashboard.json snapshot, written
+ * by webapp_dashboard_push.py via PUT /api/dashboard-data.
+ *
+ * Deliberately holds only aggregate, slowly-changing data. ELR *history* is
+ * NOT here — it's ~386k rows (~187 MB as JSON), which no part of this path
+ * can carry, and it's only ever needed one dealer at a time. It's read live
+ * instead (caseRepository.ts's fetchElrHistoryForDealer). Rule of thumb for
+ * future changes: aggregate data belongs in the snapshot, per-dealer data is
+ * read live.
+ */
 export interface DashboardData {
   dealers: Dealer[];
   elrCurrent: ElrPosition[];
-  elrHistory: ElrPosition[];
   claimMix: ClaimMixEntry[];
+}
+
+/**
+ * GET /api/dashboard response — a narrow projection of the snapshot's
+ * elrCurrent, carrying only the columns the dashboard table actually
+ * renders. The endpoint used to return the whole snapshot file, which meant
+ * every browser downloaded all of it (dealers and claim mix included) on
+ * every page load just to draw a five-column table.
+ */
+export interface DashboardSummaryRow {
+  dealerCode: string;
+  dealerName: string | null;
+  contractYear: number;
+  earnedLossRatio: number | null;
+  ragStatus: RagStatus;
+}
+
+export interface DashboardSummary {
+  elrCurrent: DashboardSummaryRow[];
 }
 
 // uwr_case — append-only immutable header. Never writable wholesale from the UI.

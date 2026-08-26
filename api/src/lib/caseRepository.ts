@@ -112,6 +112,34 @@ export async function fetchElrPositionsForDealer(dealerCode: string): Promise<El
   return rows.map(toElrPosition);
 }
 
+/**
+ * One dealer's full ELR history (every period, not just the latest), read
+ * live rather than from the periodic dashboard.json snapshot.
+ *
+ * This is deliberately NOT in the snapshot. The history table holds one row
+ * per dealer x product x contract_year x period — roughly 386k rows across
+ * all dealers, ~187 MB as JSON, which is far past what the snapshot path can
+ * carry (Azure SWA caps an /api request at 30 MB and each request at 45s;
+ * GitHub's Contents API refuses commits well below that size). Every one of
+ * those rows was previously shipped so that a single dealer's ELR trend
+ * chart could be drawn. Reading per-dealer here costs nothing extra
+ * architecturally: getDealer already makes a live Databricks call for this
+ * dealer's cases, so there is no new credential, dependency, or latency
+ * class — see README.md's "Two data paths".
+ *
+ * Ordered in SQL so the trend chart plots chronologically regardless of the
+ * warehouse's row ordering.
+ */
+export async function fetchElrHistoryForDealer(dealerCode: string): Promise<ElrPosition[]> {
+  const rows = await executeStatement(
+    `SELECT * FROM uwr_warranty_elr_snapshot
+     WHERE dealer_code = :dealer_code
+     ORDER BY financial_period_end_date`,
+    [{ name: "dealer_code", value: dealerCode, type: "STRING" }],
+  );
+  return rows.map(toElrPosition);
+}
+
 export async function fetchActiveCasesForCohort(
   dealerCode: string,
   product: string,

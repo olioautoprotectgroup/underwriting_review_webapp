@@ -2,7 +2,7 @@ import type {
   CaseDetail,
   CaseEventInput,
   CaseWithCurrentState,
-  DashboardData,
+  DashboardSummary,
   Dealer,
   ElrPosition,
   ClaimMixEntry,
@@ -24,14 +24,15 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-export async function getDashboard(): Promise<DashboardData> {
+export async function getDashboard(): Promise<DashboardSummary> {
   const res = await fetch("/api/dashboard");
-  return handle<DashboardData>(res);
+  return handle<DashboardSummary>(res);
 }
 
 export interface DealerDetail {
   dealer: Dealer;
   elrCurrent: ElrPosition[];
+  /** Read live from Databricks by the API, not from the snapshot. */
   elrHistory: ElrPosition[];
   claimMix: ClaimMixEntry[];
   cases: CaseWithCurrentState[];

@@ -22,10 +22,20 @@ underwriting_review_webapp/
 
 ## Two data paths — don't confuse them
 
-- **Dashboard data (dealers, ELR/RAG, claim mix)** is read-only and periodically refreshed. A Databricks job (`underwriting_reviews/notebooks/webapp_dashboard_push.py`, weekly Monday 08:30) pushes a fresh `api/data/dashboard.json` via `PUT /api/dashboard-data`, committed to this repo through the GitHub Contents API with SHA-based optimistic concurrency — the same pattern `repairer_network` uses for its repairer directory.
-- **Case data (open/close/notes/assign)** is read and written **live**, directly against Databricks' `uwr_case`/`uwr_case_event`/`uwr_case_current` tables, via a personal access token (PAT) and the SQL Statement Execution API. It is never part of the git-committed snapshot. See `api/src/lib/caseRules.ts` and `api/src/lib/caseRepository.ts`.
+**The rule: aggregate data lives in the snapshot, per-dealer data is read live.**
 
-This split exists because the case-open precondition (dealer currently Amber/Red, no other active case for that cohort) must be checked against Databricks' live state — a periodically refreshed snapshot would risk a real correctness bug — and once a live Databricks call is required for that anyway, keeping cases out of the git-committed file avoids a second, eventually-consistent copy of compliance-relevant data.
+- **Snapshot (dealers, ELR *current*, claim mix)** is read-only and periodically refreshed. A Databricks job (`underwriting_reviews/notebooks/webapp_dashboard_push.py`, weekly Monday 08:30) pushes a fresh `api/data/dashboard.json` via `PUT /api/dashboard-data`, committed to this repo through the GitHub Contents API with SHA-based optimistic concurrency — the same pattern `repairer_network` uses for its repairer directory.
+- **Live, directly against Databricks** via a personal access token and the SQL Statement Execution API (`api/src/lib/databricks.ts`, `caseRepository.ts`):
+  - **Case data (open/close/notes/assign)** — `uwr_case`/`uwr_case_event`/`uwr_case_current`.
+  - **ELR history** — `uwr_warranty_elr_snapshot`, one dealer at a time (`fetchElrHistoryForDealer`).
+
+Two different reasons, worth keeping straight:
+
+**Cases are live for correctness.** The case-open precondition (dealer currently Amber/Red, no other active case for that cohort) must be checked against Databricks' live state — a periodically refreshed snapshot would risk a real correctness bug. Once a live call is required anyway, keeping cases out of the git-committed file avoids a second, eventually-consistent copy of compliance-relevant data.
+
+**ELR history is live for volume.** It holds one row per dealer × product × contract_year × period — ~386K rows, ~187 MB as JSON — and is only ever needed for one dealer at a time, to draw that dealer's trend chart. Pushing all of it through the snapshot broke on several independent platform limits simultaneously: Azure Static Web Apps caps an `/api` request at **30 MB** and each request at **45 seconds** (neither configurable, any tier), Consumption functions get **1.5 GB** of memory against a path that holds several inflating copies of the payload, and GitHub's Contents API refuses commits far below 187 MB. It would also have added roughly **1 GB/year of permanent git history**, and `api/data/dashboard.json` is deployed *inside* the app, against the Free tier's 250 MB budget.
+
+If you're adding a new field, ask which of the two it is. Anything sized by dealer count is probably fine in the snapshot; anything sized by dealer × period almost certainly is not.
 
 ## Auth
 

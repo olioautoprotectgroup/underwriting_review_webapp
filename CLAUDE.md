@@ -25,13 +25,29 @@ owner all have push access, so a direct push collides silently.
 
 ## Two data paths — don't confuse them when making changes
 
-- **Dashboard data** (`api/data/dashboard.json`): read-only, refreshed
-  periodically by a Databricks job via `PUT /api/dashboard-data`. Never add
-  case data to this file or that endpoint.
-- **Case data**: read and written **live** against Databricks
-  (`api/src/lib/databricks.ts`, `caseRepository.ts`) — never routed through
-  the git-committed snapshot. See `README.md` and `api/src/lib/caseRules.ts`
-  for why.
+**The rule: aggregate data lives in the snapshot, per-dealer data is read
+live.** When adding a field, decide which it is first.
+
+- **Snapshot** (`api/data/dashboard.json`): read-only, refreshed periodically
+  by a Databricks job via `PUT /api/dashboard-data`. Holds dealers, ELR
+  *current*, and claim mix. Never add case data or ELR history to this file
+  or that endpoint.
+- **Live** against Databricks (`api/src/lib/databricks.ts`,
+  `caseRepository.ts`) — never routed through the git-committed snapshot:
+  - **Case data**, for **correctness** (the case-open precondition must see
+    live state).
+  - **ELR history**, for **volume** (~386K rows / ~187 MB; needed one dealer
+    at a time — `fetchElrHistoryForDealer`).
+
+See `README.md` for the platform limits that make the volume half
+non-negotiable: SWA caps an `/api` request at 30 MB and 45s, Consumption
+functions at 1.5 GB memory, and GitHub's Contents API refuses large commits.
+Anything sized by dealer × period does not belong in the snapshot.
+
+`GET /api/dashboard` returns a deliberate **projection**, not the whole
+snapshot file — it previously returned everything, so every browser
+downloaded the full dealer list and claim mix to draw a five-column table.
+Add columns to that projection explicitly; don't widen it back out.
 
 ## Repo conventions
 

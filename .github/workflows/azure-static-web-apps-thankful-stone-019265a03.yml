@@ -46,6 +46,18 @@ jobs:
           github_id_token: ${{ steps.idtoken.outputs.result }}
           ###### End of Repository/Build Configurations ######
 
+  # This job tears down the PR's preview ("staging") environment on close, so
+  # its slot is returned to the pool. The Free plan allows only 3 preview
+  # environments, so it genuinely matters.
+  #
+  # azure_static_web_apps_api_token below is NOT part of Azure's generated
+  # template — it omits it here, so the job died on "deployment_token was not
+  # provided" at every single PR close. Nothing was ever torn down, the 3 slots
+  # filled up with orphans from PRs #1-#4, and the next PR's deploy then failed
+  # with "This Static Web App already has the maximum number of staging
+  # environments". Easy to dismiss as a cosmetic red X on an already-merged PR;
+  # it is actually a slow resource leak that eventually blocks every preview
+  # deploy. Keep this token wired up.
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest
@@ -55,4 +67,5 @@ jobs:
         id: closepullrequest
         uses: Azure/static-web-apps-deploy@v1
         with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN_THANKFUL_STONE_019265A03 }}
           action: "close"

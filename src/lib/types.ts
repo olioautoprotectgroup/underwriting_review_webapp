@@ -40,11 +40,28 @@ export interface ClaimMixEntry {
   paidGbp: number;
 }
 
+/**
+ * Shape of the git-committed api/data/dashboard.json snapshot. Aggregate,
+ * slowly-changing data only — ELR history is NOT here (too large; read live
+ * per dealer instead). Kept in hand-sync with api/src/lib/types.ts.
+ */
 export interface DashboardData {
   dealers: Dealer[];
   elrCurrent: ElrPosition[];
-  elrHistory: ElrPosition[];
   claimMix: ClaimMixEntry[];
+}
+
+/** GET /api/dashboard response — only the columns the dashboard renders. */
+export interface DashboardSummaryRow {
+  dealerCode: string;
+  dealerName: string | null;
+  contractYear: number;
+  earnedLossRatio: number | null;
+  ragStatus: RagStatus;
+}
+
+export interface DashboardSummary {
+  elrCurrent: DashboardSummaryRow[];
 }
 
 // uwr_case — append-only immutable header. Never writable wholesale from the UI.

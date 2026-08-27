@@ -87,26 +87,46 @@ async function githubRequest(url: string, token: string, init?: RequestInit) {
 }
 
 /**
- * Fetches the dashboard snapshot straight from GitHub, along with the
- * blob's current sha. Every write must build on this rather than the local
- * file (which only reflects whatever was deployed last) — otherwise two
- * writeback calls close together would each silently overwrite the other's
- * change, even though each individual git commit succeeds.
+ * Fetches the current blob sha of the dashboard snapshot straight from
+ * GitHub. Every write must build on this rather than on the local file
+ * (which only reflects whatever was deployed last) — otherwise two writeback
+ * calls close together would each silently overwrite the other's change,
+ * even though each individual git commit succeeds.
+ *
+ * Returns the sha ONLY, and deliberately never touches `content`. The
+ * earlier version of this function base64-decoded and JSON.parse'd the
+ * content it never used, which was a latent time bomb: the Contents API
+ * returns `content: ""` for any file over 1 MB (above that size only the
+ * raw/object media types carry content), so `JSON.parse("")` would throw as
+ * soon as the snapshot crossed 1 MB. The caller swallowed that throw and
+ * fell back to committing with no sha, which GitHub rejects with a 422 on an
+ * existing path — meaning every push would have failed permanently, with the
+ * optimistic-concurrency guarantee silently void. The sha is still present in
+ * the JSON response at any size, so asking for nothing else keeps this
+ * correct however large the file gets.
  */
-export async function getCurrentDashboardJson<T>(): Promise<{ data: T; sha: string }> {
+export async function getDashboardFileSha(): Promise<string> {
   const { owner, repo, branch, path, token } = repoConfig();
   const contentsUrl = `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
-  const file = (await githubRequest(contentsUrl, token)) as { sha: string; content: string };
-  const decoded = Buffer.from(file.content, "base64").toString("utf-8");
-  return { data: JSON.parse(decoded) as T, sha: file.sha };
+  const file = (await githubRequest(contentsUrl, token)) as { sha?: string };
+  if (!file.sha) {
+    throw new Error(`GitHub returned no sha for ${path} on ${branch}`);
+  }
+  return file.sha;
 }
 
 /**
  * Commits the given JSON content to the dashboard data file, replacing it
- * entirely. `expectedSha` must be the sha from the getCurrentDashboardJson()
+ * entirely. `expectedSha` must be the sha from the getDashboardFileSha()
  * call this write was based on — GitHub rejects the commit with a 409 if the
  * file has moved on since (a concurrent writeback), which surfaces as a
  * clear "please retry" error instead of silently discarding either write.
+ *
+ * Serialized compactly, not pretty-printed: this file is written and read
+ * only by machines, and 2-space indentation inflates it substantially — which
+ * then inflates the base64 copy by a further 4/3 on the way to GitHub. Node
+ * caps a single string at ~512 MB, so that indentation buys nothing and eats
+ * real headroom.
  */
 export async function commitDashboardJson(
   content: unknown,
@@ -114,7 +134,7 @@ export async function commitDashboardJson(
   commitMessage: string,
 ): Promise<void> {
   const { owner, repo, branch, path, token } = repoConfig();
-  const body = JSON.stringify(content, null, 2) + "\n";
+  const body = JSON.stringify(content) + "\n";
   const encoded = Buffer.from(body, "utf-8").toString("base64");
 
   await githubRequest(`${GITHUB_API}/repos/${owner}/${repo}/contents/${path}`, token, {

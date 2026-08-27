@@ -1,6 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { gunzipSync } from "node:zlib";
-import { commitDashboardJson, getCurrentDashboardJson } from "../lib/github";
+import { commitDashboardJson, getDashboardFileSha } from "../lib/github";
 import { isAuthorizedWriteback } from "../lib/auth";
 import type { DashboardData } from "../lib/types";
 
@@ -22,20 +22,42 @@ const FORBIDDEN: HttpResponseInit = {
 export async function putDashboardData(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
   if (!isAuthorizedWriteback(request)) return FORBIDDEN;
 
+  // Decoding is inside a try/catch on purpose. It used to sit outside one,
+  // and an unhandled throw here is invisible to the caller: the platform
+  // returns a bare 500 with an empty body and nothing but a trace ID, which
+  // is indistinguishable from an infrastructure failure and cost real time
+  // to diagnose. Any failure to read the body is a client error — say so.
   let body: DashboardData;
-  const encoding = request.headers.get("content-encoding")?.toLowerCase();
-  if (encoding === "gzip") {
-    const raw = Buffer.from(await request.arrayBuffer());
-    body = JSON.parse(gunzipSync(raw).toString("utf-8")) as DashboardData;
-  } else {
-    body = (await request.json()) as DashboardData;
-  }
-  if (!Array.isArray(body.dealers) || !Array.isArray(body.elrCurrent)) {
-    return { status: 400, jsonBody: { error: "Malformed dashboard payload" } };
+  try {
+    const encoding = request.headers.get("content-encoding")?.toLowerCase();
+    if (encoding === "gzip") {
+      const raw = Buffer.from(await request.arrayBuffer());
+      body = JSON.parse(gunzipSync(raw).toString("utf-8")) as DashboardData;
+    } else {
+      body = (await request.json()) as DashboardData;
+    }
+  } catch (err) {
+    context.error("Failed to read dashboard payload", err);
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      status: 400,
+      jsonBody: { error: "Could not read the request body as JSON", detail: message },
+    };
   }
 
-  const { sha } = await getCurrentDashboardJson<DashboardData>().catch(() => ({ sha: undefined as unknown as string }));
+  if (
+    !Array.isArray(body?.dealers) ||
+    !Array.isArray(body?.elrCurrent) ||
+    !Array.isArray(body?.claimMix)
+  ) {
+    return {
+      status: 400,
+      jsonBody: { error: "Malformed dashboard payload: expected dealers, elrCurrent and claimMix arrays" },
+    };
+  }
+
   try {
+    const sha = await getDashboardFileSha();
     await commitDashboardJson(body, sha, "Refresh dashboard data from Databricks");
   } catch (err) {
     context.error("Failed to commit dashboard data", err);

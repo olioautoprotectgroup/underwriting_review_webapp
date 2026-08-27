@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { gunzipSync } from "node:zlib";
+import { looksGzipped, parseMaybeGzippedJson } from "../lib/requestBody";
 import { commitDashboardJson, getDashboardFileSha } from "../lib/github";
 import { isAuthorizedWriteback } from "../lib/auth";
 import type { DashboardData } from "../lib/types";
@@ -27,15 +27,24 @@ export async function putDashboardData(request: HttpRequest, context: Invocation
   // returns a bare 500 with an empty body and nothing but a trace ID, which
   // is indistinguishable from an infrastructure failure and cost real time
   // to diagnose. Any failure to read the body is a client error — say so.
+  //
+  // Compression is detected from the body's magic bytes, NOT from
+  // Content-Encoding, because that header does not survive the trip: the push
+  // job sets it, the gzip body arrives intact, but the header is stripped en
+  // route. See requestBody.ts for the full reasoning.
   let body: DashboardData;
   try {
-    const encoding = request.headers.get("content-encoding")?.toLowerCase();
-    if (encoding === "gzip") {
-      const raw = Buffer.from(await request.arrayBuffer());
-      body = JSON.parse(gunzipSync(raw).toString("utf-8")) as DashboardData;
-    } else {
-      body = (await request.json()) as DashboardData;
+    const raw = Buffer.from(await request.arrayBuffer());
+    const gzipped = looksGzipped(raw);
+    if (gzipped && request.headers.get("content-encoding")?.toLowerCase() !== "gzip") {
+      // Not an error — just the condition that made this bug hard to see.
+      // Worth a breadcrumb if the platform's behaviour ever changes back.
+      context.log(
+        "Body is gzipped (detected by magic bytes) but Content-Encoding was not received — " +
+          "header was stripped in transit, as expected on Static Web Apps.",
+      );
     }
+    body = parseMaybeGzippedJson(raw) as DashboardData;
   } catch (err) {
     context.error("Failed to read dashboard payload", err);
     const message = err instanceof Error ? err.message : String(err);

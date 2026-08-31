@@ -1,6 +1,10 @@
 import { app, HttpRequest, HttpResponseInit } from "@azure/functions";
 import { loadDashboardData } from "../lib/data";
-import { fetchCasesForDealer, fetchElrHistoryForDealer } from "../lib/caseRepository";
+import {
+  fetchCasesForDealer,
+  fetchClaimMixForDealer,
+  fetchElrHistoryForDealer,
+} from "../lib/caseRepository";
 import { isAuthorizedStaff } from "../lib/auth";
 
 const FORBIDDEN: HttpResponseInit = {
@@ -9,15 +13,16 @@ const FORBIDDEN: HttpResponseInit = {
 };
 
 /**
- * Combines the periodically-refreshed dealer/ELR-current/claim-mix snapshot
- * with live reads of this dealer's ELR history and cases.
+ * Combines the periodically-refreshed dealer/ELR-current snapshot with live
+ * reads of this dealer's ELR history, claim mix, and cases.
  *
  * Cases are always live (see the frontend development plan's "Case write
  * path") — the snapshot never carries case data, so there's nothing to
- * reconcile. ELR *history* is also live, for a different reason: it's far
- * too large to ship through the snapshot at all (see
- * fetchElrHistoryForDealer). Both live reads are issued concurrently, since
- * neither depends on the other and each is a separate warehouse round trip.
+ * reconcile. ELR *history* and *claim mix* are live for a different reason:
+ * both are per-dealer data that was bloating a weekly-committed snapshot
+ * (history ~386k rows; claim mix ~19k). All three live reads are issued
+ * concurrently — none depends on another, and each is its own warehouse
+ * round trip, so serialising them would triple the page's latency.
  */
 export async function getDealer(request: HttpRequest): Promise<HttpResponseInit> {
   if (!isAuthorizedStaff(request)) return FORBIDDEN;
@@ -29,9 +34,9 @@ export async function getDealer(request: HttpRequest): Promise<HttpResponseInit>
   if (!dealer) return { status: 404, jsonBody: { error: `No dealer with code "${dealerCode}"` } };
 
   const elrCurrent = dashboard.elrCurrent.filter((p) => p.dealerCode === dealerCode);
-  const claimMix = dashboard.claimMix.filter((c) => c.dealerCode === dealerCode);
-  const [elrHistory, cases] = await Promise.all([
+  const [elrHistory, claimMix, cases] = await Promise.all([
     fetchElrHistoryForDealer(dealerCode),
+    fetchClaimMixForDealer(dealerCode),
     fetchCasesForDealer(dealerCode),
   ]);
 

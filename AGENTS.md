@@ -34,8 +34,8 @@ access, so a direct push collides silently.
 live.** When adding a field, decide which it is first.
 
 - **Snapshot** (`api/data/dashboard.json`): read-only, refreshed periodically
-  by a Databricks job via `PUT /api/dashboard-data`. Holds dealers, ELR
-  *current*, and claim mix. Never add case data or ELR history to this file
+  by a Databricks job via `PUT /api/dashboard-data`. Holds dealers and ELR
+  *current* only. Never add case data, ELR history or claim mix to this file
   or that endpoint.
 - **Live** against Databricks (`api/src/lib/databricks.ts`,
   `caseRepository.ts`) — never routed through the git-committed snapshot:
@@ -43,6 +43,8 @@ live.** When adding a field, decide which it is first.
     live state).
   - **ELR history**, for **volume** (~386K rows / ~187 MB; needed one dealer
     at a time — `fetchElrHistoryForDealer`).
+  - **Claim mix**, same reason at smaller scale (~19K rows / ~1.5 MB of a
+    weekly git commit — `fetchClaimMixForDealer`).
 
 See `README.md` for the platform limits that make the volume half
 non-negotiable: SWA caps an `/api` request at 30 MB and 45s, Consumption

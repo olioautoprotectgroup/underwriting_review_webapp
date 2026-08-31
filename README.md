@@ -13,7 +13,7 @@ underwriting_review_webapp/
 │   ├── components/             # RagBadge, DealerSummary, ElrTrendChart, CaseCard, CaseEventForm
 │   └── lib/                    # api.ts (fetch client), types.ts, allowlist.ts (UI-only copy)
 ├── api/                         # Azure Functions backend
-│   ├── data/dashboard.json     # Git-committed ELR/dealer/claim-mix snapshot (read-side only — no case data)
+│   ├── data/dashboard.json     # Git-committed dealer + ELR-current snapshot (aggregate only)
 │   ├── src/functions/          # One file per route group
 │   ├── src/lib/                # allowlist, auth, data, github, databricks, caseRules, caseRepository, types
 │   └── test/                   # Vitest unit tests for caseRules and auth
@@ -24,10 +24,11 @@ underwriting_review_webapp/
 
 **The rule: aggregate data lives in the snapshot, per-dealer data is read live.**
 
-- **Snapshot (dealers, ELR *current*, claim mix)** is read-only and periodically refreshed. A Databricks job (`underwriting_reviews/notebooks/webapp_dashboard_push.py`, weekly Monday 08:30) pushes a fresh `api/data/dashboard.json` via `PUT /api/dashboard-data`, committed to this repo through the GitHub Contents API with SHA-based optimistic concurrency — the same pattern `repairer_network` uses for its repairer directory.
+- **Snapshot (dealers, ELR *current*)** is read-only and periodically refreshed. A Databricks job (`underwriting_reviews/notebooks/webapp_dashboard_push.py`, weekly Monday 08:30) pushes a fresh `api/data/dashboard.json` via `PUT /api/dashboard-data`, committed to this repo through the GitHub Contents API with SHA-based optimistic concurrency — the same pattern `repairer_network` uses for its repairer directory.
 - **Live, directly against Databricks** via a personal access token and the SQL Statement Execution API (`api/src/lib/databricks.ts`, `caseRepository.ts`):
   - **Case data (open/close/notes/assign)** — `uwr_case`/`uwr_case_event`/`uwr_case_current`.
   - **ELR history** — `uwr_warranty_elr_snapshot`, one dealer at a time (`fetchElrHistoryForDealer`).
+  - **Claim mix** — `vw_fact_claim`, Warranty-filtered, one dealer at a time (`fetchClaimMixForDealer`).
 
 Two different reasons, worth keeping straight:
 

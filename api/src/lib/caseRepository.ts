@@ -6,6 +6,7 @@ import type {
   CaseEventInput,
   CaseStatus,
   CaseWithCurrentState,
+  ClaimMixEntry,
   ElrPosition,
   OpenCaseInput,
   RagStatus,
@@ -138,6 +139,48 @@ export async function fetchElrHistoryForDealer(dealerCode: string): Promise<ElrP
     [{ name: "dealer_code", value: dealerCode, type: "STRING" }],
   );
   return rows.map(toElrPosition);
+}
+
+/**
+ * This platform reports on Warranty only. Mirrors `PRODUCT_SCOPE` in
+ * underwriting_reviews' notebooks/_config.py — kept as a named constant so
+ * the two are easy to diff by eye if the scope ever widens.
+ */
+const PRODUCT_SCOPE = "WARRANTY";
+
+/**
+ * One dealer's claim mix by loss type, read live rather than from the
+ * periodic snapshot.
+ *
+ * Replicates webapp_dashboard_push.py's claim_mix_df aggregation exactly,
+ * narrowed to a single dealer. Moved off the snapshot because it is
+ * per-dealer data (getDealer was the only consumer, and it filtered to one
+ * dealer anyway) and it was ~19k rows of a 14.6 MB file committed weekly —
+ * see README.md's "Two data paths".
+ *
+ * The product filter is REQUIRED and not optional cosmetics: unlike the ELR
+ * tables, vw_fact_claim spans every product, so dropping it would silently
+ * inflate both figures for every dealer.
+ */
+export async function fetchClaimMixForDealer(dealerCode: string): Promise<ClaimMixEntry[]> {
+  const rows = await executeStatement(
+    `SELECT loss_type,
+            COUNT(DISTINCT claim_id) AS claim_count,
+            SUM(paid_amount_gbp)     AS paid_gbp
+     FROM vw_fact_claim
+     WHERE product = :product AND dealer_code = :dealer_code
+     GROUP BY loss_type`,
+    [
+      { name: "product", value: PRODUCT_SCOPE, type: "STRING" },
+      { name: "dealer_code", value: dealerCode, type: "STRING" },
+    ],
+  );
+  return rows.map((row) => ({
+    dealerCode,
+    lossType: row.loss_type as string,
+    claimCount: num(row.claim_count),
+    paidGbp: num(row.paid_gbp),
+  }));
 }
 
 export async function fetchActiveCasesForCohort(

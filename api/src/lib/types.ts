@@ -41,17 +41,22 @@ export interface ClaimMixEntry {
  * The shape of the git-committed api/data/dashboard.json snapshot, written
  * by webapp_dashboard_push.py via PUT /api/dashboard-data.
  *
- * Deliberately holds only aggregate, slowly-changing data. ELR *history* is
- * NOT here — it's ~386k rows (~187 MB as JSON), which no part of this path
- * can carry, and it's only ever needed one dealer at a time. It's read live
- * instead (caseRepository.ts's fetchElrHistoryForDealer). Rule of thumb for
- * future changes: aggregate data belongs in the snapshot, per-dealer data is
- * read live.
+ * Deliberately holds only aggregate, slowly-changing data. Two things are
+ * NOT here, both read live per dealer instead:
+ *
+ * - **ELR history** (~386k rows, ~187 MB as JSON) — no part of this path
+ *   could carry it. See caseRepository.ts's fetchElrHistoryForDealer.
+ * - **Claim mix** (~19k rows) — smaller, but still per-dealer data on a
+ *   file committed to git weekly. See fetchClaimMixForDealer.
+ *
+ * Rule of thumb for future changes: aggregate data belongs in the snapshot,
+ * per-dealer data is read live. `dealers` is the deliberate exception — it
+ * is per-dealer, but moving it would fork master_dealer's dedup recipe
+ * between this repo and the notebook, which isn't worth the divergence risk.
  */
 export interface DashboardData {
   dealers: Dealer[];
   elrCurrent: ElrPosition[];
-  claimMix: ClaimMixEntry[];
 }
 
 /**

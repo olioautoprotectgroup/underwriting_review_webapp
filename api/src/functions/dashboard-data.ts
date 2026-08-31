@@ -54,14 +54,17 @@ export async function putDashboardData(request: HttpRequest, context: Invocation
     };
   }
 
-  if (
-    !Array.isArray(body?.dealers) ||
-    !Array.isArray(body?.elrCurrent) ||
-    !Array.isArray(body?.claimMix)
-  ) {
+  // Validates only the keys the snapshot still carries. `claimMix` is
+  // deliberately NOT required: it moved to a live per-dealer read, and a
+  // payload that still includes it (an older notebook revision) must keep
+  // working. That tolerance is the point — when elrHistory was removed, the
+  // notebook change merged before the webapp change and briefly left every
+  // dealer page 500ing. Accepting both shapes means these two repos can be
+  // deployed in either order.
+  if (!Array.isArray(body?.dealers) || !Array.isArray(body?.elrCurrent)) {
     return {
       status: 400,
-      jsonBody: { error: "Malformed dashboard payload: expected dealers, elrCurrent and claimMix arrays" },
+      jsonBody: { error: "Malformed dashboard payload: expected dealers and elrCurrent arrays" },
     };
   }
 

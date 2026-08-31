@@ -42,13 +42,12 @@ export interface ClaimMixEntry {
 
 /**
  * Shape of the git-committed api/data/dashboard.json snapshot. Aggregate,
- * slowly-changing data only — ELR history is NOT here (too large; read live
- * per dealer instead). Kept in hand-sync with api/src/lib/types.ts.
+ * slowly-changing data only — ELR history and claim mix are NOT here; both
+ * are read live per dealer. Kept in hand-sync with api/src/lib/types.ts.
  */
 export interface DashboardData {
   dealers: Dealer[];
   elrCurrent: ElrPosition[];
-  claimMix: ClaimMixEntry[];
 }
 
 /** GET /api/dashboard response — only the columns the dashboard renders. */

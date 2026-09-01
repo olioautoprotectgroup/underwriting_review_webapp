@@ -22,8 +22,12 @@ const ALL_YEARS = "all";
  *    platform or the metadata repo. Rather than guess at a governed financial
  *    measure, the section is held until underwriting supplies the definition.
  *  - Claim-detail sections (elapsed time, elapsed mileage, fault, payee,
- *    parts/labour/VAT split): the columns exist upstream in `fact_claim` but
- *    nothing in the platform extracts them yet. Phase 2.
+ *    parts/labour/VAT split). These are now *defined* — underwriting confirmed
+ *    them on 2026-09-01 and they are written up in the metadata repo's
+ *    `08_underwriting_metrics_glossary.md`. What is still missing is the data:
+ *    the columns live in `fact_claim`/`fact_policy` and nothing in the platform
+ *    extracts them yet, so this is a Phase 2 pipeline job, not a definitions
+ *    one.
  */
 export default function DealerDashboardPanel({ dashboard }: { dashboard: DealerDashboard }) {
   const { header, position, development } = dashboard;
@@ -140,10 +144,10 @@ export default function DealerDashboardPanel({ dashboard }: { dashboard: DealerD
       <DevelopmentSection rows={developmentRows} />
 
       <p className="text-xs text-brand-300">
-        Two sections from the Power BI report are not shown yet: the Calculated Dealer Net
-        Difference analysis, pending a definition of that measure, and the claim-detail sections
-        (elapsed time, elapsed mileage, fault, payee, claims value split), which need a new
-        extract from <code>fact_claim</code>.
+        Two sections from the Power BI report are not shown yet. The Calculated Dealer Net
+        Difference analysis is waiting on a definition of that measure. The claim-detail sections
+        (elapsed time, elapsed mileage, fault, payee, claims value split) are defined, but need a
+        new extract from <code>fact_claim</code> before they can be built.
       </p>
     </div>
   );

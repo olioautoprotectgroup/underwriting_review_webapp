@@ -6,6 +6,7 @@ import {
   fetchElrHistoryForDealer,
 } from "../lib/caseRepository";
 import { fetchDealerDashboard } from "../lib/dealerDashboard";
+import { fetchDealerClaims } from "../lib/dealerClaims";
 import { isAuthorizedStaff } from "../lib/auth";
 
 const FORBIDDEN: HttpResponseInit = {
@@ -21,9 +22,15 @@ const FORBIDDEN: HttpResponseInit = {
  * path") — the snapshot never carries case data, so there's nothing to
  * reconcile. ELR *history* and *claim mix* are live for a different reason:
  * both are per-dealer data that was bloating a weekly-committed snapshot
- * (history ~386k rows; claim mix ~19k). All three live reads are issued
+ * (history ~386k rows; claim mix ~19k). All live reads are issued
  * concurrently — none depends on another, and each is its own warehouse
- * round trip, so serialising them would triple the page's latency.
+ * round trip, so serialising them would multiply the page's latency.
+ *
+ * `claims` is returned alongside `dashboard` rather than inside it because it
+ * is a genuinely different basis: `dashboard` is policy-grained off
+ * `uwr_transformed_data`, `claims` is claim-grained off `vw_fact_claim`, and
+ * their claim values do not tie (see dealerClaims.ts). Keeping them as sibling
+ * keys means nothing in the payload implies they are two views of one number.
  */
 export async function getDealer(request: HttpRequest): Promise<HttpResponseInit> {
   if (!isAuthorizedStaff(request)) return FORBIDDEN;
@@ -35,15 +42,24 @@ export async function getDealer(request: HttpRequest): Promise<HttpResponseInit>
   if (!dealer) return { status: 404, jsonBody: { error: `No dealer with code "${dealerCode}"` } };
 
   const elrCurrent = dashboard.elrCurrent.filter((p) => p.dealerCode === dealerCode);
-  const [elrHistory, claimMix, cases, dealerDashboard] = await Promise.all([
+  const [elrHistory, claimMix, cases, dealerDashboard, claims] = await Promise.all([
     fetchElrHistoryForDealer(dealerCode),
     fetchClaimMixForDealer(dealerCode),
     fetchCasesForDealer(dealerCode),
     fetchDealerDashboard(dealerCode),
+    fetchDealerClaims(dealerCode),
   ]);
 
   return {
-    jsonBody: { dealer, elrCurrent, elrHistory, claimMix, cases, dashboard: dealerDashboard },
+    jsonBody: {
+      dealer,
+      elrCurrent,
+      elrHistory,
+      claimMix,
+      cases,
+      dashboard: dealerDashboard,
+      claims,
+    },
   };
 }
 

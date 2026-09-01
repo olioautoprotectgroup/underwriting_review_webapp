@@ -1,6 +1,13 @@
 import { useMemo, useState } from "react";
-import type { DealerDashboard } from "../../lib/types";
+import {
+  bandOrder,
+  CLAIM_ELAPSED_BANDS,
+  CLAIM_MILEAGE_BANDS,
+} from "../../lib/claimMeasures";
+import type { DealerClaims, DealerDashboard } from "../../lib/types";
 import BreakdownSection from "./BreakdownSection";
+import ClaimBandSection from "./ClaimBandSection";
+import ClaimsValueSplitSection from "./ClaimsValueSplitSection";
 import ContractSummarySection from "./ContractSummarySection";
 import DevelopmentSection from "./DevelopmentSection";
 import { DASH, fmtDate } from "./format";
@@ -16,20 +23,25 @@ const ALL_YEARS = "all";
  * pure arithmetic on data already in the browser, so switching years is instant
  * and costs no warehouse query.
  *
- * Sections deliberately absent, and why:
- *  - "Analysis by Contract by Product — Calculated Dealer Net Difference":
- *    "Calculated Dealer Net" and "Difference" are not defined anywhere in the
- *    platform or the metadata repo. Rather than guess at a governed financial
- *    measure, the section is held until underwriting supplies the definition.
- *  - Claim-detail sections (elapsed time, elapsed mileage, fault, payee,
- *    parts/labour/VAT split). These are now *defined* — underwriting confirmed
- *    them on 2026-09-01 and they are written up in the metadata repo's
- *    `08_underwriting_metrics_glossary.md`. What is still missing is the data:
- *    the columns live in `fact_claim`/`fact_policy` and nothing in the platform
- *    extracts them yet, so this is a Phase 2 pipeline job, not a definitions
- *    one.
+ * The claim-detail sections (7-10) read a DIFFERENT SOURCE from everything
+ * above them: `vw_fact_claim`, claim-grained, versus `uwr_transformed_data`,
+ * policy-grained. Their claim values are on a different basis and do not tie —
+ * see `claimMeasures.ts`. They take `claims`, not `dashboard`, so the two can
+ * never be accidentally added together, and the page says so in as many words.
+ *
+ * One section is still deliberately absent: "Analysis by Contract by Product —
+ * Calculated Dealer Net Difference". "Calculated Dealer Net" and "Difference"
+ * are not defined anywhere in the platform or the metadata repo. Rather than
+ * guess at a governed financial measure, it is held until underwriting supplies
+ * the definition.
  */
-export default function DealerDashboardPanel({ dashboard }: { dashboard: DealerDashboard }) {
+export default function DealerDashboardPanel({
+  dashboard,
+  claims,
+}: {
+  dashboard: DealerDashboard;
+  claims: DealerClaims;
+}) {
   const { header, position, development } = dashboard;
   const [year, setYear] = useState<string>(ALL_YEARS);
 
@@ -49,6 +61,26 @@ export default function DealerDashboardPanel({ dashboard }: { dashboard: DealerD
         ? development
         : development.filter((r) => String(r.contractYear) === year),
     [development, year],
+  );
+
+  // The claim arrays need their own filter — the year selector is applied once
+  // here, per array, and nothing propagates it automatically. Both carry
+  // `policy_contract_year` from fact_claim, so the same cohort filter applies
+  // even though the grain differs.
+  const claimRows = useMemo(
+    () =>
+      year === ALL_YEARS
+        ? claims.rows
+        : claims.rows.filter((r) => String(r.contractYear) === year),
+    [claims.rows, year],
+  );
+
+  const faultRows = useMemo(
+    () =>
+      year === ALL_YEARS
+        ? claims.faults
+        : claims.faults.filter((r) => String(r.contractYear) === year),
+    [claims.faults, year],
   );
 
   if (position.length === 0) {
@@ -143,11 +175,53 @@ export default function DealerDashboardPanel({ dashboard }: { dashboard: DealerD
 
       <DevelopmentSection rows={developmentRows} />
 
+      <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <h2 className="text-sm font-bold uppercase tracking-wide text-amber-800">
+          Claim detail — a different basis
+        </h2>
+        <p className="mt-1 text-xs leading-relaxed text-amber-900">
+          The four sections below read <code>vw_fact_claim</code> directly, one row per claim.
+          Everything above reads <code>uwr_transformed_data</code>, whose claim figures are a
+          monthly snapshot trued up against <code>fact_claim</code>. Because that true-up matches
+          the two positions on an inner join and applies the whole correction to each policy's
+          latest period, <strong>the claim values below will not tie exactly to the ones above</strong>.
+          Both are correct on their own basis. The Claims Value Split is different again: it uses
+          the assessed cost columns, which are in the repairer's currency rather than the scheme
+          currency used elsewhere, so its total is not comparable either.
+        </p>
+      </section>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ClaimBandSection
+          title="Analysis by Elapsed Time"
+          subtitle="Time from cover start to the loss, banded as vehicle age is."
+          rows={claimRows}
+          groupBy={(r) => r.elapsedBand}
+          order={bandOrder(CLAIM_ELAPSED_BANDS)}
+        />
+        <ClaimBandSection
+          title="Analysis by Elapsed Mileage"
+          subtitle="Odometer reading at breakdown — absolute, not miles since sale. Click a band for its faults."
+          rows={claimRows}
+          groupBy={(r) => r.mileageBand}
+          order={bandOrder(CLAIM_MILEAGE_BANDS)}
+          faults={faultRows}
+        />
+        <ClaimBandSection
+          title="Claim Payee Analysis"
+          subtitle="Who was paid, by claim volume and value."
+          rows={claimRows}
+          groupBy={(r) => r.payeeType}
+        />
+        <ClaimsValueSplitSection rows={claimRows} />
+      </div>
+
       <p className="text-xs text-brand-300">
-        Two sections from the Power BI report are not shown yet. The Calculated Dealer Net
-        Difference analysis is waiting on a definition of that measure. The claim-detail sections
-        (elapsed time, elapsed mileage, fault, payee, claims value split) are defined, but need a
-        new extract from <code>fact_claim</code> before they can be built.
+        One section from the Power BI report is still not shown: the Calculated Dealer Net
+        Difference analysis, which is waiting on a definition of that measure. An{" "}
+        <em>Unknown</em> band in the two banded sections above means the underlying date or
+        odometer value was missing or outside a plausible range — those claims are surfaced
+        rather than dropped, so the band totals still add up.
       </p>
     </div>
   );

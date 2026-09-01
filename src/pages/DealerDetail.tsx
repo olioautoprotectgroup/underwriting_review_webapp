@@ -66,7 +66,7 @@ export default function DealerDetail() {
           </p>
         }
       >
-        <DealerDashboardPanel dashboard={detail.dashboard} />
+        <DealerDashboardPanel dashboard={detail.dashboard} claims={detail.claims} />
       </Suspense>
 
       <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-brand-100">

@@ -1,8 +1,13 @@
-import { useEffect, useState, useCallback } from "react";
+import { Suspense, lazy, useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { getDealerDetail, openCase, type DealerDetail as DealerDetailData } from "../lib/api";
 import DealerSummary from "../components/DealerSummary";
 import ElrTrendChart from "../components/ElrTrendChart";
+
+// Lazy-loaded: this panel pulls in Recharts, which roughly triples the bundle.
+// It is only ever rendered on this page, so code-splitting keeps the dashboard
+// list, case pages and sign-in as light as they were before charts existed.
+const DealerDashboardPanel = lazy(() => import("../components/dashboard/DealerDashboardPanel"));
 import CaseCard from "../components/CaseCard";
 import type { OpenCaseInput } from "../lib/types";
 
@@ -51,8 +56,18 @@ export default function DealerDetail() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-6">
+    <div className="mx-auto max-w-6xl space-y-6 p-6">
       {currentPosition && <DealerSummary dealer={detail.dealer} position={currentPosition} />}
+
+      <Suspense
+        fallback={
+          <p className="rounded-xl bg-white p-5 text-sm text-brand-400 shadow-sm ring-1 ring-brand-100">
+            Loading dashboard…
+          </p>
+        }
+      >
+        <DealerDashboardPanel dashboard={detail.dashboard} />
+      </Suspense>
 
       <section className="rounded-xl bg-white p-5 shadow-sm ring-1 ring-brand-100">
         <h2 className="mb-3 text-sm font-bold uppercase tracking-wide text-brand-400">

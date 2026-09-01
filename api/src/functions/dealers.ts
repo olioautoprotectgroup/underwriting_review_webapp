@@ -5,6 +5,7 @@ import {
   fetchClaimMixForDealer,
   fetchElrHistoryForDealer,
 } from "../lib/caseRepository";
+import { fetchDealerDashboard } from "../lib/dealerDashboard";
 import { isAuthorizedStaff } from "../lib/auth";
 
 const FORBIDDEN: HttpResponseInit = {
@@ -34,13 +35,16 @@ export async function getDealer(request: HttpRequest): Promise<HttpResponseInit>
   if (!dealer) return { status: 404, jsonBody: { error: `No dealer with code "${dealerCode}"` } };
 
   const elrCurrent = dashboard.elrCurrent.filter((p) => p.dealerCode === dealerCode);
-  const [elrHistory, claimMix, cases] = await Promise.all([
+  const [elrHistory, claimMix, cases, dealerDashboard] = await Promise.all([
     fetchElrHistoryForDealer(dealerCode),
     fetchClaimMixForDealer(dealerCode),
     fetchCasesForDealer(dealerCode),
+    fetchDealerDashboard(dealerCode),
   ]);
 
-  return { jsonBody: { dealer, elrCurrent, elrHistory, claimMix, cases } };
+  return {
+    jsonBody: { dealer, elrCurrent, elrHistory, claimMix, cases, dashboard: dealerDashboard },
+  };
 }
 
 app.http("dealers-get", {

@@ -3,6 +3,7 @@ import type {
   CaseEventInput,
   CaseWithCurrentState,
   DashboardSummary,
+  DealerDashboard,
   Dealer,
   ElrPosition,
   ClaimMixEntry,
@@ -36,6 +37,8 @@ export interface DealerDetail {
   elrHistory: ElrPosition[];
   claimMix: ClaimMixEntry[];
   cases: CaseWithCurrentState[];
+  /** The Power BI Dealer Dashboard rebuild — read live from uwr_transformed_data. */
+  dashboard: DealerDashboard;
 }
 
 export async function getDealerDetail(dealerCode: string): Promise<DealerDetail> {

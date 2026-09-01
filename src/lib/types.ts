@@ -123,3 +123,54 @@ export type OpenCaseInput = Omit<
  * fromStatus/actor/eventAt are always server-derived. */
 export type CaseEventInput = Pick<CaseEvent, "eventType"> &
   Partial<Pick<CaseEvent, "status" | "priority" | "assignedTo" | "dueDate" | "note">>;
+
+// ---------------------------------------------------------------------------
+// Dealer Dashboard — the web rebuild of the Power BI paginated report.
+// Mirrors api/src/lib/dealerDashboard.ts by hand (same convention as the rest
+// of this file). Rows carry the seven base sums only; every displayed measure
+// is derived from them client-side via dealerMeasures.ts, so changing the year
+// or the plotted measure never needs another warehouse round trip.
+// ---------------------------------------------------------------------------
+
+export interface DealerPositionRow {
+  contractYear: number;
+  underwritingCode: string | null;
+  vehicleAgeBand: string | null;
+  vehicleMileageBand: string | null;
+  productTypeName: string | null;
+  term: string | null;
+  vehicleMake: string | null;
+  soldPolicies: number;
+  dealerNet: number;
+  uwPremium: number;
+  earnedPremium: number;
+  claimCount: number;
+  claimsValue: number;
+  claimFund: number;
+}
+
+export interface DealerDevelopmentRow {
+  contractYear: number;
+  period: number;
+  claimsValue: number;
+  earnedPremium: number;
+}
+
+export interface DealerDashboardHeader {
+  dealerCode: string;
+  dealerName: string | null;
+  agent: string | null;
+  firstSoldOn: string | null;
+  lastSoldOn: string | null;
+  lastEndDate: string | null;
+  /** The as-at date the position is earned to — the report's "Earn Till". */
+  earnTill: string | null;
+  firstContractYear: number | null;
+  lastContractYear: number | null;
+}
+
+export interface DealerDashboard {
+  header: DealerDashboardHeader;
+  position: DealerPositionRow[];
+  development: DealerDevelopmentRow[];
+}

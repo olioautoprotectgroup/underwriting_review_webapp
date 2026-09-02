@@ -51,27 +51,42 @@ export const ZERO_CLAIM_BASES: ClaimBases = {
 /**
  * The Claims Value Split — section 10.
  *
- * Parts / Labour / VAT on the **assessed** (authorised) basis, per the
- * confirmed glossary row: Parts = `parts_cost_excluding_tax`, Labour =
- * `labour_cost_excluding_tax`, VAT = `parts_tax + labour_tax`, and the three
- * sum to `authorised_amount`.
+ * Parts / Labour / VAT on the **assessed** (authorised) basis: Parts =
+ * `parts_cost_excluding_tax`, Labour = `labour_cost_excluding_tax`, VAT =
+ * `parts_tax + labour_tax`.
  *
- * 🚩 These are the **bare** cost columns, which INDEX convention #4 documents as
- * proforma/repairer currency — a different basis from the
- * `authorised_amount_scheme_currency` used for Claim Value in sections 7-9. So
- * `total` here is NOT the same quantity as `claimValue` on the same rows, and
- * the two will differ for any non-GBP claim. Confirmed deliberately on
- * 2026-09-01 as matching the live report; flagged on the page.
+ * **Every percentage is over Claims Value, not over the three components' own
+ * sum.** Verified against the published Redgate Lodge dashboard: Parts
+ * £191,530.44 of Claims Value £265,399.64 prints as 72.17%, which is
+ * parts ÷ claim value. Dividing by the components' sum would give 74.47% —
+ * plausible-looking and wrong.
+ *
+ * 🚩 **The three components do not add up to Claims Value.** On Redgate Lodge
+ * they cover 96.91%, leaving £8,191.17 unaccounted for. The live report simply
+ * does not show that remainder. `other` exposes it so the column reaches 100%
+ * and the gap is visible rather than being a puzzle for whoever adds the
+ * percentages up. What it consists of is not documented anywhere.
+ *
+ * 🚩 These are also the **bare** cost columns, which INDEX convention #4
+ * documents as proforma/repairer currency, whereas `claimValue` is
+ * `authorised_amount_scheme_currency`. For a mixed-currency book that alone
+ * would make the percentages wrong; it is how the live report computes them.
  */
 export interface ClaimValueSplit {
   parts: number;
   labour: number;
   vat: number;
-  /** Parts + Labour + VAT. Sums to the bare `authorised_amount`. */
-  total: number;
+  /**
+   * The denominator every percentage below uses: the section's Claims Value,
+   * the same figure the other claim sections total to.
+   */
+  claimValue: number;
+  /** Claims Value − (Parts + Labour + VAT). See the 🚩 below. */
+  other: number;
   partsPct: number | null;
   labourPct: number | null;
   vatPct: number | null;
+  otherPct: number | null;
   /** `labour_cost_excluding_tax / repair_time` — the effective assessed rate. */
   labourPerHour: number | null;
 }
@@ -84,18 +99,20 @@ export function splitClaimValue(b: ClaimBases): ClaimValueSplit {
   const parts = b.partsCost;
   const labour = b.labourCost;
   const vat = b.partsTax + b.labourTax;
-  const total = parts + labour + vat;
+  const claimValue = b.claimValue;
   return {
     parts,
     labour,
     vat,
-    total,
-    // A zero total yields null, not 0% — the same null-vs-zero rule as
+    claimValue,
+    other: claimValue - (parts + labour + vat),
+    // A zero denominator yields null, not 0% — the same null-vs-zero rule as
     // dealerMeasures.ts. A dealer with no claims has no split, which is a
     // different statement from a split of 0%.
-    partsPct: pct(safeDivide(parts, total)),
-    labourPct: pct(safeDivide(labour, total)),
-    vatPct: pct(safeDivide(vat, total)),
+    partsPct: pct(safeDivide(parts, claimValue)),
+    labourPct: pct(safeDivide(labour, claimValue)),
+    vatPct: pct(safeDivide(vat, claimValue)),
+    otherPct: pct(safeDivide(claimValue - (parts + labour + vat), claimValue)),
     labourPerHour: safeDivide(labour, b.repairTime),
   };
 }
@@ -142,32 +159,43 @@ export function sharePct(rowCount: number, groupCount: number): number | null {
 // ---------------------------------------------------------------------------
 // Banding
 //
-// Both bands reuse the boundaries and labels `transformed_data_port.py:294-321`
-// already uses for `Vehicle_Age_Grouping` and `Vehicle_Mileage_Group`, per
-// underwriting's 2026-09-01 decision to keep the dashboard's bandings
-// consistent. Semantics preserved exactly: lower-inclusive, upper-exclusive, so
-// exactly 36 months lands in "B: 3 - 5 Years" and exactly 20000 miles in
-// "20k - 40k".
+// Both band tables are taken from the LIVE REPORT'S OWN LABELS, read off the
+// published Redgate Lodge dashboard (dealer 12299132, contracts 2023-2026).
+//
+// They are NOT the `Vehicle_Age_Grouping` / `Vehicle_Mileage_Group` bands from
+// transformed_data_port.py. An earlier version of this file reused those, which
+// was wrong on both counts: the report bands claim age in DAYS, not vehicle
+// years, and its mileage bands top out at "Over 15 K" — impossible for an
+// odometer reading on a used car, and proof that Elapsed Mileage really is
+// mileage *since sale* rather than the absolute reading.
+//
+// Semantics follow the rest of the platform: lower-inclusive, upper-exclusive.
+// The report's own labels overlap at the boundaries ("A: 0 - 500" then
+// "B: 500 - 1000"), so exactly 500 lands in B.
 //
 // These tables are the single source of truth. `dealerClaims.ts` builds its SQL
 // CASE expression from them and binds every threshold, so the warehouse and the
 // browser cannot drift into disagreeing about which band a value falls in — a
 // test asserts the generated SQL matches this table.
 //
-// 🚩 One deliberate difference from the notebook. The port dumps INT_MIN and
-// negative garbage into the LOWEST band, to match the live model exactly — a
-// decision taken for policy data. The glossary requires bound-filtering for the
-// claim bands, so unusable values route to an explicit UNKNOWN_BAND instead.
-// Dropping them would make these sections' totals disagree with each other;
-// hiding them in "0k - 20k" would misstate the best band. Neither is acceptable
-// when the reader is judging a dealer.
+// 🚩 Unusable values route to an explicit UNKNOWN_BAND rather than the lowest
+// band. transformed_data_port.py deliberately does the opposite for policy data,
+// to match the live model. Here, dropping them would make these sections' totals
+// disagree with each other, and hiding them in the best band would misstate it
+// on a page used to judge a dealer.
 // ---------------------------------------------------------------------------
 
 /** Where a value that cannot be banded goes. Visible, never silently dropped. */
 export const UNKNOWN_BAND = "Unknown";
 
-/** Where a claim with no recorded payee type goes. */
-export const UNRECORDED_PAYEE = "Unrecorded";
+/**
+ * Where a claim with a NULL `payee_type` goes.
+ *
+ * Deliberately not "Unknown": the report shows a literal `UNKNOWN` payee type
+ * in the data (2 claims on Redgate Lodge), and conflating a real category with
+ * a missing value would merge two different things into one row.
+ */
+export const UNRECORDED_PAYEE = "Not recorded";
 
 export interface Band {
   /** Exclusive upper bound; null for the final catch-all band. */
@@ -175,44 +203,65 @@ export interface Band {
   label: string;
 }
 
-/** Elapsed months between cover start and loss. Thresholds are months. */
+/**
+ * "Claim Age" — whole DAYS between cover start and the loss.
+ *
+ * Eleven bands: a tight 0-14 and 15-30 at the front, then 30-day steps to 270,
+ * then a catch-all. That shape is why the vehicle-age bands were the wrong
+ * reuse — on Redgate Lodge's 2023 cohort, 159 of 265 claims fall in
+ * "K: Over 270 Days", and every one of them would have collapsed into a single
+ * "A: 0 - 3 Years" bucket under the old banding.
+ */
 export const CLAIM_ELAPSED_BANDS: readonly Band[] = [
-  { upperExclusive: 36, label: "A: 0 - 3 Years" },
-  { upperExclusive: 60, label: "B: 3 - 5 Years" },
-  { upperExclusive: 84, label: "C: 5 - 7 Years" },
-  { upperExclusive: 120, label: "D: 7 - 10 Years" },
-  { upperExclusive: 144, label: "E: 10 - 12 Years" },
-  { upperExclusive: null, label: "F: Over 12 Years" },
-];
-
-/** Absolute odometer reading at breakdown. NOT miles since sale. */
-export const CLAIM_MILEAGE_BANDS: readonly Band[] = [
-  { upperExclusive: 20000, label: "0k - 20k" },
-  { upperExclusive: 40000, label: "20k - 40k" },
-  { upperExclusive: 60000, label: "40k - 60k" },
-  { upperExclusive: 80000, label: "60k - 80k" },
-  { upperExclusive: 100000, label: "80k - 100k" },
-  { upperExclusive: null, label: "Over 100k" },
+  { upperExclusive: 15, label: "A: 0 - 14" },
+  { upperExclusive: 31, label: "B: 15 - 30" },
+  { upperExclusive: 61, label: "C: 31 - 60" },
+  { upperExclusive: 91, label: "D: 61 - 90" },
+  { upperExclusive: 121, label: "E: 91 - 120" },
+  { upperExclusive: 151, label: "F: 121 - 150" },
+  { upperExclusive: 181, label: "G: 151 - 180" },
+  { upperExclusive: 211, label: "H: 181 - 210" },
+  { upperExclusive: 241, label: "I: 211 - 240" },
+  { upperExclusive: 271, label: "J: 241 - 270" },
+  { upperExclusive: null, label: "K: Over 270 Days" },
 ];
 
 /**
- * The largest odometer reading treated as real. Above this, `breakdown_mileage`
- * is the documented "absurd maxima (billions)" garbage.
+ * "Claim Mileage" — miles covered between sale and breakdown.
  *
- * 🚩 This threshold is NOT documented anywhere — `01_fact_claim_context.md` says
- * "bound-filter INT_MIN / billions" and gives no number, and no profiled range
- * for the column exists. 500,000 is a judgement call: comfortably above any
- * genuine vehicle covered by a used-car warranty, far below the garbage.
- * Recorded here rather than buried in SQL so it can be argued with.
+ * Fine at the bottom (0-500, 500-1000) because an early-life failure is the
+ * signal underwriting cares about, then widening to a 15k catch-all.
+ */
+export const CLAIM_MILEAGE_BANDS: readonly Band[] = [
+  { upperExclusive: 500, label: "A: 0 - 500" },
+  { upperExclusive: 1000, label: "B: 500 - 1000" },
+  { upperExclusive: 2500, label: "C: 1000 - 2500" },
+  { upperExclusive: 5000, label: "D: 2500 - 5000" },
+  { upperExclusive: 10000, label: "E: 5 K - 10 K" },
+  { upperExclusive: 15000, label: "F: 10 K - 15 K" },
+  { upperExclusive: null, label: "G: Over 15 K" },
+];
+
+/**
+ * The largest elapsed mileage treated as real.
+ *
+ * 🚩 NOT a documented threshold. `01_fact_claim_context.md` says to bound-filter
+ * "INT_MIN / billions" and gives no number, and the column has never been
+ * profiled. 500,000 is a judgement call: far above any genuine miles-since-sale
+ * on a used-car warranty, far below the garbage. Recorded here rather than
+ * buried in SQL so it can be argued with.
  */
 export const MAX_PLAUSIBLE_MILEAGE = 500_000;
 
 /**
- * Bands a value, returning `UNKNOWN_BAND` for null or negative input.
+ * Bands a value, returning `UNKNOWN_BAND` for null, non-finite or negative
+ * input.
  *
- * Negative matters for elapsed time: a loss dated before cover start is either
- * a sentinel date that escaped normalisation or a genuine data problem. Either
- * way it is not "0 - 3 years", so it is surfaced rather than absorbed.
+ * Negative matters for both sections: a loss dated before cover start, or a
+ * breakdown odometer below the sale reading, is either a sentinel that escaped
+ * normalisation or a genuine data problem. Either way it is not "0 - 14 days"
+ * or "0 - 500 miles", so it is surfaced rather than absorbed into the band that
+ * makes the dealer look best.
  */
 export function bandFor(value: number | null, bands: readonly Band[]): string {
   if (value === null || !Number.isFinite(value) || value < 0) return UNKNOWN_BAND;
@@ -226,13 +275,11 @@ export function bandFor(value: number | null, bands: readonly Band[]): string {
  * Display order for a banded section: the bands in their natural order, with
  * `UNKNOWN_BAND` last.
  *
- * Order comes from the band table, never from sorting the labels. As it happens
- * en-GB collation orders today's labels correctly — "0k - 20k" … "Over 100k",
- * and the age labels carry "A: ".."F: " prefixes precisely to make that work —
- * but that is a coincidence of these particular strings, not a property to rely
- * on. Rename a band to "5k - 10k" and it would collate before "0k - 20k" with
- * nothing to signal the reordering. Taking the order from the table means the
- * labels are free to change.
+ * Order comes from the band table, never from sorting the labels. The "A: ".."K: "
+ * prefixes are the report's own and would mostly collate correctly, but relying
+ * on that is fragile — the mileage labels alone contain "5 K - 10 K" and
+ * "10 K - 15 K", which collate in the wrong order. Taking the order from the
+ * table means the labels are free to change.
  */
 export function bandOrder(bands: readonly Band[]): string[] {
   return [...bands.map((b) => b.label), UNKNOWN_BAND];

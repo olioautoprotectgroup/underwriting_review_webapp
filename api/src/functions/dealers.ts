@@ -7,12 +7,7 @@ import {
 } from "../lib/caseRepository";
 import { fetchDealerDashboard } from "../lib/dealerDashboard";
 import { fetchDealerClaims } from "../lib/dealerClaims";
-import { isAuthorizedStaff } from "../lib/auth";
-
-const FORBIDDEN: HttpResponseInit = {
-  status: 403,
-  jsonBody: { error: "Access restricted to approved underwriting staff" },
-};
+import { forbiddenResponse, isAuthorizedStaff } from "../lib/auth";
 
 /**
  * Combines the periodically-refreshed dealer/ELR-current snapshot with live
@@ -33,7 +28,7 @@ const FORBIDDEN: HttpResponseInit = {
  * keys means nothing in the payload implies they are two views of one number.
  */
 export async function getDealer(request: HttpRequest): Promise<HttpResponseInit> {
-  if (!isAuthorizedStaff(request)) return FORBIDDEN;
+  if (!isAuthorizedStaff(request)) return forbiddenResponse(request);
   const dealerCode = request.params.code;
   if (!dealerCode) return { status: 400, jsonBody: { error: "dealerCode is required" } };
 

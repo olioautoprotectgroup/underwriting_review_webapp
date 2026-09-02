@@ -16,8 +16,26 @@ async function handle<T>(res: Response): Promise<T> {
     const text = await res.text().catch(() => "");
     let message = text || res.statusText;
     try {
-      const parsed = JSON.parse(text) as { error?: string; detail?: string };
+      const parsed = JSON.parse(text) as {
+        error?: string;
+        detail?: string;
+        signedInAs?: string | null;
+      };
       if (parsed.error) message = [parsed.error, parsed.detail].filter(Boolean).join(" — ");
+
+      // A 403 carries the identity the SERVER saw. Surface it, because the
+      // server and this app check the allowlist separately and can disagree:
+      // when they do, the user gets the full signed-in shell with a bare
+      // "access restricted" inside it, and nothing says which identity was
+      // refused. That happened, and cost a diagnosis. `signedInAs: null` means
+      // the request reached the API with no sign-in identity attached at all,
+      // which is a different fault worth distinguishing.
+      if ("signedInAs" in parsed) {
+        message +=
+          parsed.signedInAs === null || parsed.signedInAs === undefined
+            ? " — the API received no sign-in identity for this request"
+            : ` — the server sees you as ${parsed.signedInAs}`;
+      }
     } catch {
       // not JSON — use the raw text as-is
     }

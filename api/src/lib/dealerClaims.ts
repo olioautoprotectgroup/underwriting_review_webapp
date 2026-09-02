@@ -21,11 +21,15 @@ import { DASHBOARD_UNDERWRITING_CODES } from "./dealerDashboard";
  * `fact_policy` join, added to the view on 2026-09-01 specifically to make the
  * elapsed-time band possible.
  *
- * 🚩 **These sections do not tie to sections 1-6.** See the note at the top of
- * `claimMeasures.ts` for why (the true-up's inner join and period allocation).
- * Choosing `authorised_amount_scheme_currency` — the column the true-up itself
- * feeds from — makes them as close as they can be, per underwriting's
- * 2026-09-01 decision. The page says so explicitly.
+ * **They should normally tie to sections 1-6.** The published Redgate Lodge
+ * dashboard has them agreeing exactly — 2023: 265 claims / £83,922.75 in both
+ * the summary and the two banded sections — which is what the true-up is built
+ * to produce: `SUM(Adapt_Claim_Value)` over a policy's periods equals
+ * `fact_claim`'s current position for that policy, so reading the same column
+ * (`authorised_amount_scheme_currency`) lands on the same number. The exception
+ * is a policy present in `fact_claim` but absent from `fact_monthly_snapshot`:
+ * the true-up's INNER join skips it, so it counts here and not there. A small
+ * difference is possible; a large one means something is wrong.
  *
  * Per-dealer, so read live rather than shipped in the snapshot — README.md's
  * "Two data paths" rule, and the same reason claim mix moved live.
@@ -70,6 +74,29 @@ const CLAIM_STATUS_SCOPE = [
 const MIN_PLAUSIBLE_YEAR = 1990;
 const MAX_PLAUSIBLE_YEAR = 2100;
 
+/**
+ * How "Claim Mileage" is computed — **miles since sale, not the odometer
+ * reading**.
+ *
+ * The published Redgate Lodge dashboard settles this: its bands run
+ * `A: 0 - 500` to `G: Over 15 K`, which no used car's odometer could satisfy.
+ * An earlier version of this file used `breakdown_mileage` directly and was
+ * wrong.
+ *
+ * 🚩 **Which column produces it is still unconfirmed.** `distance_to_claim` is
+ * named for exactly this and is used here, but it has no documented definition,
+ * units or range. The alternative is the explicit subtraction:
+ *
+ *     c.breakdown_mileage - fp.vehicle_sold_mileage
+ *
+ * `claim_band_verification.py` in the `underwriting_reviews` repo runs both
+ * against this dealer and compares each to the report's published band counts,
+ * which is what will decide it. Until that has been run, treat this section's
+ * bands as provisional — swapping the choice is this one constant.
+ */
+const ELAPSED_MILEAGE_EXPR =
+  "CASE WHEN c.distance_to_claim BETWEEN 0 AND :max_mileage THEN c.distance_to_claim END";
+
 /** One row of the claim breakdown, at the union grain of sections 7, 9 and 10. */
 export interface DealerClaimRow extends ClaimBases {
   contractYear: number;
@@ -87,9 +114,18 @@ export interface ClaimFaultRow {
   claimValue: number;
 }
 
+/** One fault narrative for a contract year — the Claim Causal Part Analysis. */
+export interface CausalPartRow {
+  contractYear: number;
+  faultDescription: string;
+  claimCount: number;
+  claimValue: number;
+}
+
 export interface DealerClaims {
   rows: DealerClaimRow[];
   faults: ClaimFaultRow[];
+  causalParts: CausalPartRow[];
 }
 
 function num(v: string | null): number {
@@ -207,14 +243,13 @@ async function fetchClaimBreakdown(dealerCode: string): Promise<DealerClaimRow[]
   const { where, params } = claimFilter(dealerCode);
   const { params: dateParams, safeDate } = dateGuards();
 
-  const elapsedExpr = `months_between(${safeDate("c.loss_date")}, ${safeDate("c.start_date")})`;
+  // Whole days, matching the report's "Claim Age" bands (A: 0 - 14 … K: Over
+  // 270 Days). datediff, not months_between: the bands step in days and a
+  // fractional month count would land values on the wrong side of a boundary.
+  const elapsedExpr = `datediff(${safeDate("c.loss_date")}, ${safeDate("c.start_date")})`;
   const elapsed = buildBandCase(elapsedExpr, CLAIM_ELAPSED_BANDS, "el");
 
-  // Bound-filter above the plausible ceiling as well as below zero: the column
-  // carries "absurd maxima (billions)" garbage that would otherwise all land in
-  // "Over 100k" and make that band meaningless.
-  const mileageExpr = `CASE WHEN c.breakdown_mileage <= :max_mileage THEN c.breakdown_mileage END`;
-  const mileage = buildBandCase(mileageExpr, CLAIM_MILEAGE_BANDS, "mi");
+  const mileage = buildBandCase(ELAPSED_MILEAGE_EXPR, CLAIM_MILEAGE_BANDS, "mi");
 
   const rows = await executeStatement(
     `SELECT c.policy_contract_year                        AS contract_year,
@@ -273,8 +308,7 @@ const FAULTS_PER_BAND = 10;
 async function fetchClaimFaults(dealerCode: string): Promise<ClaimFaultRow[]> {
   const { where, params } = claimFilter(dealerCode);
 
-  const mileageExpr = `CASE WHEN c.breakdown_mileage <= :max_mileage THEN c.breakdown_mileage END`;
-  const mileage = buildBandCase(mileageExpr, CLAIM_MILEAGE_BANDS, "mi");
+  const mileage = buildBandCase(ELAPSED_MILEAGE_EXPR, CLAIM_MILEAGE_BANDS, "mi");
 
   const rows = await executeStatement(
     `WITH ranked AS (
@@ -313,11 +347,60 @@ async function fetchClaimFaults(dealerCode: string): Promise<ClaimFaultRow[]> {
   }));
 }
 
-/** Both claim queries, concurrently — neither depends on the other. */
+/** How many fault narratives to keep per contract year in the causal-part section. */
+const CAUSAL_PARTS_PER_YEAR = 25;
+
+/**
+ * "Claim Causal Part Analysis" — the commonest fault narratives per contract
+ * year, as its own section of the report.
+ *
+ * Same ranking-and-capping approach as the mileage-band drill-down, and for the
+ * same reason: `fault_description` is free text. The published report makes that
+ * vivid — one of its rows is an entire paragraph of technician notes. Capping at
+ * 25 per year keeps the section readable; the UI rolls whatever is left into a
+ * single "other faults" line so the totals still reconcile.
+ */
+async function fetchCausalParts(dealerCode: string): Promise<CausalPartRow[]> {
+  const { where, params } = claimFilter(dealerCode);
+
+  const rows = await executeStatement(
+    `WITH ranked AS (
+       SELECT c.policy_contract_year                   AS contract_year,
+              COALESCE(c.fault_description, :no_fault) AS fault_description,
+              COUNT(DISTINCT c.claim_id)               AS claim_count,
+              SUM(c.authorised_amount_scheme_currency) AS claim_value,
+              ROW_NUMBER() OVER (
+                PARTITION BY c.policy_contract_year
+                ORDER BY COUNT(DISTINCT c.claim_id) DESC
+              ) AS rn
+       FROM ${CLAIM_TABLE} c${where}
+       GROUP BY c.policy_contract_year, COALESCE(c.fault_description, :no_fault)
+     )
+     SELECT contract_year, fault_description, claim_count, claim_value
+     FROM ranked
+     WHERE rn <= :causal_limit
+     ORDER BY contract_year, claim_count DESC`,
+    [
+      ...params,
+      { name: "no_fault", value: "Not recorded", type: "STRING" },
+      { name: "causal_limit", value: CAUSAL_PARTS_PER_YEAR, type: "INT" },
+    ],
+  );
+
+  return rows.map((r) => ({
+    contractYear: num(r.contract_year),
+    faultDescription: r.fault_description ?? "Not recorded",
+    claimCount: num(r.claim_count),
+    claimValue: num(r.claim_value),
+  }));
+}
+
+/** All three claim queries, concurrently — none depends on another. */
 export async function fetchDealerClaims(dealerCode: string): Promise<DealerClaims> {
-  const [rows, faults] = await Promise.all([
+  const [rows, faults, causalParts] = await Promise.all([
     fetchClaimBreakdown(dealerCode),
     fetchClaimFaults(dealerCode),
+    fetchCausalParts(dealerCode),
   ]);
-  return { rows, faults };
+  return { rows, faults, causalParts };
 }

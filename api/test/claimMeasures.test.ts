@@ -19,94 +19,160 @@ function bases(overrides: Partial<ClaimBases> = {}): ClaimBases {
   return { ...ZERO_CLAIM_BASES, ...overrides };
 }
 
-describe("splitClaimValue — the Claims Value Split", () => {
-  // Parts 600 + Labour 300 + VAT (120 + 60 = 180) = 1080.
-  const b = bases({
-    partsCost: 600,
-    labourCost: 300,
-    partsTax: 120,
-    labourTax: 60,
-    repairTime: 4,
+/**
+ * These assert the REAL published figures from the live Power BI "Dealer
+ * Dashboard" for REDGATE LODGE (dealer 12299132, contracts 2023-2026) — a
+ * claims-heavy dealer, chosen precisely because the earlier Oakmere sample has
+ * zero claims and exercised none of this.
+ *
+ * Published Claims Value Split:
+ *   Claims Value £265,399.64
+ *   Parts Value  £191,530.44   72.17%
+ *   Labour        £55,048.55   20.74%
+ *   VAT           £10,629.48    4.01%
+ *   Labour/Hour       £49.78
+ */
+const REDGATE: ClaimBases = {
+  claimCount: 680,
+  claimValue: 265399.64,
+  partsCost: 191530.44,
+  labourCost: 55048.55,
+  // The report prints VAT as one figure; only the two-column sum is observable.
+  partsTax: 10629.48,
+  labourTax: 0,
+  // Back-solved from the published Labour/Hour: 55048.55 / 49.78.
+  repairTime: 55048.55 / 49.78,
+};
+
+describe("splitClaimValue — against the published Redgate Lodge dashboard", () => {
+  const s = splitClaimValue(REDGATE);
+
+  it("reproduces the published Parts split of 72.17%", () => {
+    expect(s.partsPct).toBeCloseTo(72.17, 2);
   });
 
+  it("reproduces the published Labour split of 20.74%", () => {
+    expect(s.labourPct).toBeCloseTo(20.74, 2);
+  });
+
+  it("reproduces the published VAT split of 4.01%", () => {
+    expect(s.vatPct).toBeCloseTo(4.01, 2);
+  });
+
+  it("reproduces the published Labour/Hour of £49.78", () => {
+    expect(s.labourPerHour).toBeCloseTo(49.78, 2);
+  });
+
+  it("divides by Claims Value, NOT by the components' own sum", () => {
+    // This is the bug the published report caught. Dividing Parts by
+    // (parts + labour + vat) gives 74.47% — plausible-looking, and wrong by
+    // more than two points. Only the Claims Value denominator reproduces the
+    // report, so this pins the denominator rather than the arithmetic.
+    const componentSum = s.parts + s.labour + s.vat;
+    expect((s.parts / componentSum) * 100).toBeCloseTo(74.47, 2);
+    expect(s.partsPct).not.toBeCloseTo(74.47, 1);
+  });
+
+  it("surfaces the 3.09% of Claims Value the components do not explain", () => {
+    // Parts + Labour + VAT cover only 96.91% of Redgate's Claims Value. The
+    // live report simply omits the remainder; the web page shows it so the
+    // column reaches 100% instead of quietly falling short.
+    expect(s.other).toBeCloseTo(8191.17, 2);
+    expect(s.otherPct).toBeCloseTo(3.09, 2);
+    expect(
+      (s.partsPct ?? 0) + (s.labourPct ?? 0) + (s.vatPct ?? 0) + (s.otherPct ?? 0),
+    ).toBeCloseTo(100, 6);
+  });
+});
+
+describe("splitClaimValue — null and zero semantics", () => {
   it("sums VAT from both tax columns, not just one", () => {
-    // The confirmed definition is `parts_tax + labour_tax`. Taking only one
-    // would understate VAT and make the three parts fail to sum to the whole.
-    expect(splitClaimValue(b).vat).toBe(180);
-  });
-
-  it("totals to the sum of the three components", () => {
-    expect(splitClaimValue(b).total).toBe(1080);
-  });
-
-  it("splits to percentages that add to 100", () => {
-    const s = splitClaimValue(b);
-    expect(s.partsPct).toBeCloseTo(55.5556, 4);
-    expect(s.labourPct).toBeCloseTo(27.7778, 4);
-    expect(s.vatPct).toBeCloseTo(16.6667, 4);
-    expect((s.partsPct ?? 0) + (s.labourPct ?? 0) + (s.vatPct ?? 0)).toBeCloseTo(100, 6);
+    const s = splitClaimValue(bases({ claimValue: 100, partsTax: 30, labourTax: 20 }));
+    expect(s.vat).toBe(50);
   });
 
   it("computes Labour per Hour from labour excluding tax, not labour plus VAT", () => {
     // 300 / 4 = 75. Using 360 (labour + its tax) would give 90 and silently
     // overstate the effective rate by the VAT rate.
-    expect(splitClaimValue(b).labourPerHour).toBe(75);
+    const s = splitClaimValue(bases({ claimValue: 1000, labourCost: 300, labourTax: 60, repairTime: 4 }));
+    expect(s.labourPerHour).toBe(75);
   });
 
   it("reports Labour per Hour as null, not zero or Infinity, when repair time is zero", () => {
-    const s = splitClaimValue(bases({ labourCost: 300, repairTime: 0 }));
+    const s = splitClaimValue(bases({ claimValue: 500, labourCost: 300, repairTime: 0 }));
     expect(s.labourPerHour).toBeNull();
   });
 
-  it("reports every split percentage as null when there is no claim cost at all", () => {
+  it("reports every split percentage as null when there is no claim value at all", () => {
     // A dealer with no claims has no split. Rendering 0% would assert the
     // claims exist and cost nothing — the same null-vs-zero rule as the
     // policy-side measures.
     const s = splitClaimValue(ZERO_CLAIM_BASES);
-    expect(s.total).toBe(0);
     expect(s.partsPct).toBeNull();
     expect(s.labourPct).toBeNull();
     expect(s.vatPct).toBeNull();
+    expect(s.otherPct).toBeNull();
     expect(s.labourPerHour).toBeNull();
   });
 
-  it("keeps a genuine zero component as 0%, not blank, when other components exist", () => {
+  it("keeps a genuine zero component as 0%, not blank, when there is claim value", () => {
     // No parts on any claim is a real finding (labour-only repairs), and
     // distinct from "no claims".
-    const s = splitClaimValue(bases({ labourCost: 100, labourTax: 20 }));
+    const s = splitClaimValue(bases({ claimValue: 120, labourCost: 100, labourTax: 20 }));
     expect(s.partsPct).toBe(0);
     expect(s.labourPct).toBeCloseTo(83.3333, 4);
   });
 });
 
-describe("bandFor — boundaries are lower-inclusive, upper-exclusive", () => {
-  // Matching transformed_data_port.py:294-321 exactly. Off-by-one here would
-  // put a cohort in the wrong band and disagree with the live report.
-  it("puts exactly 36 months in the second age band, not the first", () => {
-    expect(bandFor(35.9, CLAIM_ELAPSED_BANDS)).toBe("A: 0 - 3 Years");
-    expect(bandFor(36, CLAIM_ELAPSED_BANDS)).toBe("B: 3 - 5 Years");
+describe("bandFor — the report's real bands, lower-inclusive/upper-exclusive", () => {
+  // Bands read off the published Redgate Lodge dashboard. An earlier version of
+  // this module reused transformed_data_port.py's vehicle-age and 20k-mile
+  // bands, which the report disproves: claim age is banded in DAYS, and the
+  // mileage bands top out at "Over 15 K" — impossible for an odometer reading.
+  it("bands claim age in days, not vehicle years", () => {
+    expect(bandFor(0, CLAIM_ELAPSED_BANDS)).toBe("A: 0 - 14");
+    expect(bandFor(14, CLAIM_ELAPSED_BANDS)).toBe("A: 0 - 14");
+    expect(bandFor(15, CLAIM_ELAPSED_BANDS)).toBe("B: 15 - 30");
+    expect(bandFor(270, CLAIM_ELAPSED_BANDS)).toBe("J: 241 - 270");
+    expect(bandFor(271, CLAIM_ELAPSED_BANDS)).toBe("K: Over 270 Days");
   });
 
-  it("puts exactly 20000 miles in the second mileage band, not the first", () => {
-    expect(bandFor(19999, CLAIM_MILEAGE_BANDS)).toBe("0k - 20k");
-    expect(bandFor(20000, CLAIM_MILEAGE_BANDS)).toBe("20k - 40k");
+  it("keeps every boundary day on the side the labels say", () => {
+    const boundaries: [number, string][] = [
+      [30, "B: 15 - 30"], [31, "C: 31 - 60"],
+      [60, "C: 31 - 60"], [61, "D: 61 - 90"],
+      [90, "D: 61 - 90"], [91, "E: 91 - 120"],
+      [120, "E: 91 - 120"], [121, "F: 121 - 150"],
+      [150, "F: 121 - 150"], [151, "G: 151 - 180"],
+      [180, "G: 151 - 180"], [181, "H: 181 - 210"],
+      [210, "H: 181 - 210"], [211, "I: 211 - 240"],
+      [240, "I: 211 - 240"], [241, "J: 241 - 270"],
+    ];
+    for (const [days, label] of boundaries) {
+      expect(bandFor(days, CLAIM_ELAPSED_BANDS)).toBe(label);
+    }
   });
 
-  it("puts zero in the lowest band", () => {
-    expect(bandFor(0, CLAIM_MILEAGE_BANDS)).toBe("0k - 20k");
-    expect(bandFor(0, CLAIM_ELAPSED_BANDS)).toBe("A: 0 - 3 Years");
+  it("bands claim mileage as miles since sale, 0-500 up to Over 15 K", () => {
+    expect(bandFor(0, CLAIM_MILEAGE_BANDS)).toBe("A: 0 - 500");
+    expect(bandFor(499, CLAIM_MILEAGE_BANDS)).toBe("A: 0 - 500");
+    // The labels overlap at the boundary ("A: 0 - 500", "B: 500 - 1000"), so
+    // the platform's lower-inclusive convention decides: 500 is in B.
+    expect(bandFor(500, CLAIM_MILEAGE_BANDS)).toBe("B: 500 - 1000");
+    expect(bandFor(2500, CLAIM_MILEAGE_BANDS)).toBe("D: 2500 - 5000");
+    expect(bandFor(9999, CLAIM_MILEAGE_BANDS)).toBe("E: 5 K - 10 K");
+    expect(bandFor(15000, CLAIM_MILEAGE_BANDS)).toBe("G: Over 15 K");
   });
 
-  it("falls through to the catch-all band above the last threshold", () => {
-    expect(bandFor(144, CLAIM_ELAPSED_BANDS)).toBe("F: Over 12 Years");
-    expect(bandFor(100000, CLAIM_MILEAGE_BANDS)).toBe("Over 100k");
+  it("has the eleven age bands and seven mileage bands the report prints", () => {
+    expect(CLAIM_ELAPSED_BANDS).toHaveLength(11);
+    expect(CLAIM_MILEAGE_BANDS).toHaveLength(7);
   });
 
   it("routes null and negative values to Unknown, NOT to the lowest band", () => {
-    // The deliberate departure from transformed_data_port.py, which dumps
-    // negative/INT_MIN garbage into the lowest band to match the live model.
-    // For claims the glossary requires bound-filtering, and hiding bad data in
-    // "0k - 20k" would misstate the best band on a page used to judge a dealer.
+    // Dropping them would make these sections' totals disagree with each other;
+    // absorbing them into "A: 0 - 14" or "A: 0 - 500" would misstate the best
+    // band on a page used to judge a dealer.
     expect(bandFor(null, CLAIM_MILEAGE_BANDS)).toBe(UNKNOWN_BAND);
     expect(bandFor(-1, CLAIM_MILEAGE_BANDS)).toBe(UNKNOWN_BAND);
     expect(bandFor(-2147483648, CLAIM_MILEAGE_BANDS)).toBe(UNKNOWN_BAND);
@@ -120,37 +186,34 @@ describe("bandFor — boundaries are lower-inclusive, upper-exclusive", () => {
 });
 
 describe("bandOrder", () => {
-  it("lists the mileage bands in numeric order, Unknown last", () => {
-    const order = bandOrder(CLAIM_MILEAGE_BANDS);
-    expect(order).toEqual([
-      "0k - 20k",
-      "20k - 40k",
-      "40k - 60k",
-      "60k - 80k",
-      "80k - 100k",
-      "Over 100k",
+  it("lists the report's bands in order, Unknown last", () => {
+    expect(bandOrder(CLAIM_MILEAGE_BANDS)).toEqual([
+      "A: 0 - 500",
+      "B: 500 - 1000",
+      "C: 1000 - 2500",
+      "D: 2500 - 5000",
+      "E: 5 K - 10 K",
+      "F: 10 K - 15 K",
+      "G: Over 15 K",
       UNKNOWN_BAND,
     ]);
+    expect(bandOrder(CLAIM_ELAPSED_BANDS).at(-1)).toBe(UNKNOWN_BAND);
   });
 
   it("takes order from the table, not from collating the labels", () => {
-    // en-GB collation happens to order today's real labels correctly, so
-    // sorting them would look fine. That is a coincidence of these particular
-    // strings. This band set proves the difference: "10k - 20k" collates before
-    // "5k - 10k", so a sort-based implementation would show the bands
-    // out of sequence with nothing to signal it.
-    const tricky = [
-      { upperExclusive: 5000, label: "0k - 5k" },
-      { upperExclusive: 10000, label: "5k - 10k" },
-      { upperExclusive: null, label: "10k - 20k" },
-    ];
-    const order = bandOrder(tricky);
-    expect(order).toEqual(["0k - 5k", "5k - 10k", "10k - 20k", UNKNOWN_BAND]);
+    // The report's own labels carry "A: ".."K: " prefixes, so collating them
+    // happens to give the right order and a sort-based implementation would
+    // look correct today. That is a property of the prefixes, not of the
+    // ordering logic. Strip them — as any relabelling would — and collation
+    // immediately puts "10 K - 15 K" before "5 K - 10 K".
+    const unprefixed = CLAIM_MILEAGE_BANDS.map((b) => ({
+      ...b,
+      label: b.label.replace(/^[A-Z]: /, ""),
+    }));
+    const order = bandOrder(unprefixed);
+    expect(order[4]).toBe("5 K - 10 K");
+    expect(order[5]).toBe("10 K - 15 K");
     expect([...order].sort((a, b) => a.localeCompare(b, "en-GB"))).not.toEqual(order);
-  });
-
-  it("puts Unknown last, after the real bands", () => {
-    expect(bandOrder(CLAIM_ELAPSED_BANDS).at(-1)).toBe(UNKNOWN_BAND);
   });
 });
 
@@ -198,9 +261,10 @@ describe("the SQL band CASE agrees with the TypeScript band table", () => {
 
   it("bands the elapsed table the same way", () => {
     const { sql, params } = buildBandCase("e", CLAIM_ELAPSED_BANDS, "el");
-    expect(sql.match(/WHEN e < :/g)).toHaveLength(5);
-    expect(params.some((p) => p.value === 36 && p.type === "DOUBLE")).toBe(true);
-    expect(params.some((p) => p.value === "F: Over 12 Years")).toBe(true);
+    expect(sql.match(/WHEN e < :/g)).toHaveLength(10);
+    expect(params.some((p) => p.value === 15 && p.type === "DOUBLE")).toBe(true);
+    expect(params.some((p) => p.value === 271 && p.type === "DOUBLE")).toBe(true);
+    expect(params.some((p) => p.value === "K: Over 270 Days")).toBe(true);
   });
 });
 

@@ -14,31 +14,32 @@ import type { DealerClaimRow } from "../../lib/types";
 import SectionPanel from "./SectionPanel";
 import { fmtGbp, fmtNum, fmtPct } from "./format";
 
-const SLICE_COLOURS = ["#0D2356", "#5E68CC", "#B8860B"];
+const SLICE_COLOURS = ["#0D2356", "#5E68CC", "#B8860B", "#98A4BE"];
 
 /**
  * "Claims Value Split" — section 10.
  *
- * Splits claim value three ways on the **assessed** (authorised) basis, per the
- * definition underwriting confirmed on 2026-09-01: Parts =
+ * Splits claim value on the **assessed** (authorised) basis: Parts =
  * `parts_cost_excluding_tax`, Labour = `labour_cost_excluding_tax`, VAT =
  * `parts_tax + labour_tax`. Plus Labour per Hour, the effective assessed rate.
  *
- * 🚩 Two things this section does NOT claim, both surfaced in the UI rather
- * than left for a reader to trip over:
+ * Every percentage is over **Claims Value**, matching the published Redgate
+ * Lodge dashboard (Parts £191,530.44 of £265,399.64 = 72.17%). Dividing by the
+ * components' own sum would give 74.47% — which is what this section did until
+ * that report showed otherwise.
  *
- *  - Its total is on a different currency basis from the Claims Value in the
- *    sections beside it. These are the bare cost columns (proforma/repairer
- *    currency, per INDEX convention #4) summing to the bare `authorised_amount`,
- *    while the band sections use `authorised_amount_scheme_currency`. Both were
- *    chosen deliberately; they are not two views of one number.
- *  - `repair_time`'s units are undocumented. "Per hour" is what the confirmed
- *    formula implies, not something the warehouse states.
+ * 🚩 The three components do not add up to Claims Value: on Redgate Lodge they
+ * cover 96.91%. The live report shows only the three and leaves the remainder
+ * unexplained; this section adds an "Other" row so the column reaches 100% and
+ * the gap is visible rather than being a puzzle for anyone who adds it up.
+ *
+ * 🚩 `repair_time`'s units are undocumented. "Per hour" is what the confirmed
+ * formula implies, not something the warehouse states.
  */
 export default function ClaimsValueSplitSection({ rows }: { rows: DealerClaimRow[] }) {
   const split = useMemo(() => splitClaimValue(sumClaimBases(rows)), [rows]);
 
-  if (rows.length === 0 || split.total === 0) {
+  if (rows.length === 0 || split.claimValue === 0) {
     return (
       <SectionPanel title="Claims Value Split">
         {() => (
@@ -55,12 +56,15 @@ export default function ClaimsValueSplitSection({ rows }: { rows: DealerClaimRow
     { name: "Parts", value: split.parts, pct: split.partsPct },
     { name: "Labour", value: split.labour, pct: split.labourPct },
     { name: "VAT", value: split.vat, pct: split.vatPct },
+    // Not in the live report. Shown because the three above stop short of
+    // Claims Value and a reader is entitled to know by how much.
+    { name: "Other", value: split.other, pct: split.otherPct },
   ];
 
   return (
     <SectionPanel
       title="Claims Value Split"
-      subtitle="Assessed basis: parts and labour excluding tax, plus their tax as VAT."
+      subtitle="Assessed basis, as a share of Claims Value. Parts and labour excluding tax, plus their tax as VAT."
     >
       {(view) =>
         view === "chart" ? (
@@ -112,8 +116,10 @@ export default function ClaimsValueSplitSection({ rows }: { rows: DealerClaimRow
               </tbody>
               <tfoot className="border-t-2 border-brand-200 font-semibold text-brand-800">
                 <tr>
-                  <td className="py-1.5 pr-4">Total</td>
-                  <td className="py-1.5 pr-4 text-right tabular-nums">{fmtGbp(split.total)}</td>
+                  <td className="py-1.5 pr-4">Claims Value</td>
+                  <td className="py-1.5 pr-4 text-right tabular-nums">
+                    {fmtGbp(split.claimValue)}
+                  </td>
                   <td className="py-1.5 text-right tabular-nums">{fmtPct(100)}</td>
                 </tr>
               </tfoot>

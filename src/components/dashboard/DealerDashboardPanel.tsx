@@ -8,6 +8,7 @@ import type { DealerClaims, DealerDashboard } from "../../lib/types";
 import BreakdownSection from "./BreakdownSection";
 import ClaimBandSection from "./ClaimBandSection";
 import ClaimsValueSplitSection from "./ClaimsValueSplitSection";
+import CausalPartSection from "./CausalPartSection";
 import ContractSummarySection from "./ContractSummarySection";
 import DevelopmentSection from "./DevelopmentSection";
 import { DASH, fmtDate } from "./format";
@@ -81,6 +82,14 @@ export default function DealerDashboardPanel({
         ? claims.faults
         : claims.faults.filter((r) => String(r.contractYear) === year),
     [claims.faults, year],
+  );
+
+  const causalRows = useMemo(
+    () =>
+      year === ALL_YEARS
+        ? claims.causalParts
+        : claims.causalParts.filter((r) => String(r.contractYear) === year),
+    [claims.causalParts, year],
   );
 
   if (position.length === 0) {
@@ -175,33 +184,32 @@ export default function DealerDashboardPanel({
 
       <DevelopmentSection rows={developmentRows} />
 
-      <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-        <h2 className="text-sm font-bold uppercase tracking-wide text-amber-800">
-          Claim detail — a different basis
+      <section className="rounded-xl border border-brand-200 bg-brand-50 p-4">
+        <h2 className="text-sm font-bold uppercase tracking-wide text-brand-500">
+          Claim detail — a different source
         </h2>
-        <p className="mt-1 text-xs leading-relaxed text-amber-900">
-          The four sections below read <code>vw_fact_claim</code> directly, one row per claim.
-          Everything above reads <code>uwr_transformed_data</code>, whose claim figures are a
-          monthly snapshot trued up against <code>fact_claim</code>. Because that true-up matches
-          the two positions on an inner join and applies the whole correction to each policy's
-          latest period, <strong>the claim values below will not tie exactly to the ones above</strong>.
-          Both are correct on their own basis. The Claims Value Split is different again: it uses
-          the assessed cost columns, which are in the repairer's currency rather than the scheme
-          currency used elsewhere, so its total is not comparable either.
+        <p className="mt-1 text-xs leading-relaxed text-brand-700">
+          The sections below read <code>vw_fact_claim</code>, one row per claim. Everything above
+          reads <code>uwr_transformed_data</code>, whose claim figures are a monthly snapshot trued
+          up against the same claims. They should normally agree — the live report has them
+          matching exactly — but a policy that exists in <code>fact_claim</code> and not in the
+          snapshot counts below and not above, so small differences are possible. The Claims Value
+          Split is a further step removed: it uses the assessed cost columns, which are in the
+          repairer's currency rather than the scheme currency used elsewhere.
         </p>
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <ClaimBandSection
           title="Analysis by Elapsed Time"
-          subtitle="Time from cover start to the loss, banded as vehicle age is."
+          subtitle="Days from cover start to the loss."
           rows={claimRows}
           groupBy={(r) => r.elapsedBand}
           order={bandOrder(CLAIM_ELAPSED_BANDS)}
         />
         <ClaimBandSection
           title="Analysis by Elapsed Mileage"
-          subtitle="Odometer reading at breakdown — absolute, not miles since sale. Click a band for its faults."
+          subtitle="Miles covered between sale and breakdown. Click a band for its commonest faults."
           rows={claimRows}
           groupBy={(r) => r.mileageBand}
           order={bandOrder(CLAIM_MILEAGE_BANDS)}
@@ -215,6 +223,8 @@ export default function DealerDashboardPanel({
         />
         <ClaimsValueSplitSection rows={claimRows} />
       </div>
+
+      <CausalPartSection rows={causalRows} />
 
       <p className="text-xs text-brand-300">
         One section from the Power BI report is still not shown: the Calculated Dealer Net

@@ -208,7 +208,16 @@ export interface ClaimFaultRow {
   claimValue: number;
 }
 
+/** One fault narrative for a contract year — the Claim Causal Part Analysis. */
+export interface CausalPartRow {
+  contractYear: number;
+  faultDescription: string;
+  claimCount: number;
+  claimValue: number;
+}
+
 export interface DealerClaims {
   rows: DealerClaimRow[];
   faults: ClaimFaultRow[];
+  causalParts: CausalPartRow[];
 }

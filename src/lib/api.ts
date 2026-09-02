@@ -3,6 +3,7 @@ import type {
   CaseEventInput,
   CaseWithCurrentState,
   DashboardSummary,
+  DealerClaims,
   DealerDashboard,
   Dealer,
   ElrPosition,
@@ -39,6 +40,11 @@ export interface DealerDetail {
   cases: CaseWithCurrentState[];
   /** The Power BI Dealer Dashboard rebuild — read live from uwr_transformed_data. */
   dashboard: DealerDashboard;
+  /**
+   * Sections 7-10 — read live from vw_fact_claim. A sibling key, not part of
+   * `dashboard`, because the basis differs and the claim values do not tie.
+   */
+  claims: DealerClaims;
 }
 
 export async function getDealerDetail(dealerCode: string): Promise<DealerDetail> {

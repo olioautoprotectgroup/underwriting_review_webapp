@@ -37,3 +37,15 @@ export function fmtDate(iso: string | null): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? DASH : d.toLocaleDateString("en-GB");
 }
+
+/**
+ * A plain number — miles, hours, days. Same null rule as everything else here.
+ * Separate from `fmtInt` because these carry decimals that matter: an effective
+ * labour rate of 62.5 is not 63.
+ */
+export function fmtNum(v: number | null, dp = 1): string {
+  return v === null ? DASH : v.toLocaleString("en-GB", {
+    minimumFractionDigits: dp,
+    maximumFractionDigits: dp,
+  });
+}

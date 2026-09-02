@@ -174,3 +174,41 @@ export interface DealerDashboard {
   position: DealerPositionRow[];
   development: DealerDevelopmentRow[];
 }
+
+// ---------------------------------------------------------------------------
+// Claim detail — sections 7-10 of the Dealer Dashboard.
+// Mirrors api/src/lib/dealerClaims.ts by hand (same convention as the rest of
+// this file). Claim-grained off vw_fact_claim, NOT policy-grained off
+// uwr_transformed_data — a separate top-level key precisely so nothing implies
+// these claim values tie to the ones in DealerDashboard. They do not; see
+// claimMeasures.ts for why.
+// ---------------------------------------------------------------------------
+
+/** One row of the claim breakdown, at the union grain of sections 7, 9 and 10. */
+export interface DealerClaimRow {
+  contractYear: number;
+  elapsedBand: string;
+  mileageBand: string;
+  payeeType: string;
+  claimCount: number;
+  claimValue: number;
+  partsCost: number;
+  labourCost: number;
+  partsTax: number;
+  labourTax: number;
+  repairTime: number;
+}
+
+/** One fault narrative within a mileage band, for the section 8 drill-down. */
+export interface ClaimFaultRow {
+  contractYear: number;
+  mileageBand: string;
+  faultDescription: string;
+  claimCount: number;
+  claimValue: number;
+}
+
+export interface DealerClaims {
+  rows: DealerClaimRow[];
+  faults: ClaimFaultRow[];
+}

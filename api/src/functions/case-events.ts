@@ -1,17 +1,12 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { getClientPrincipal, isAuthorizedStaff } from "../lib/auth";
+import { forbiddenResponse, getClientPrincipal, isAuthorizedStaff } from "../lib/auth";
 import { resolveTargetStatus, validateCaseEventInput } from "../lib/caseRules";
 import { fetchCaseEvents, fetchCaseWithCurrentState, insertCaseEvent } from "../lib/caseRepository";
 import { caseRuleErrorResponse } from "./cases";
 import type { CaseEventInput, CaseWithCurrentState } from "../lib/types";
 
-const FORBIDDEN: HttpResponseInit = {
-  status: 403,
-  jsonBody: { error: "Access restricted to approved underwriting staff" },
-};
-
 export async function getCaseDetail(request: HttpRequest): Promise<HttpResponseInit> {
-  if (!isAuthorizedStaff(request)) return FORBIDDEN;
+  if (!isAuthorizedStaff(request)) return forbiddenResponse(request);
   const caseId = request.params.id;
   if (!caseId) return { status: 400, jsonBody: { error: "caseId is required" } };
 
@@ -23,7 +18,7 @@ export async function getCaseDetail(request: HttpRequest): Promise<HttpResponseI
 }
 
 export async function createCaseEvent(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
-  if (!isAuthorizedStaff(request)) return FORBIDDEN;
+  if (!isAuthorizedStaff(request)) return forbiddenResponse(request);
   const caseId = request.params.id;
   if (!caseId) return { status: 400, jsonBody: { error: "caseId is required" } };
   const actor = getClientPrincipal(request)?.userDetails as string;

@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { HttpRequest } from "@azure/functions";
-import { getClientPrincipal, isAuthorizedStaff, isAuthorizedWriteback } from "../src/lib/auth";
+import {
+  forbiddenResponse,
+  getClientPrincipal,
+  isAuthorizedStaff,
+  isAuthorizedWriteback,
+} from "../src/lib/auth";
 
 function requestWithPrincipal(userDetails: string | undefined): HttpRequest {
   const headers: Record<string, string> = {};
@@ -95,5 +100,55 @@ describe("isAuthorizedWriteback", () => {
 
   it("accepts the correct key", () => {
     expect(isAuthorizedWriteback(requestWithHeader("x-writeback-key", "correct-horse-battery-staple"))).toBe(true);
+  });
+});
+
+describe("forbiddenResponse", () => {
+  // This exists because an opaque 403 hid a real bug: a user whose address was
+  // on the allowlist was refused by the API while the client-side copy of the
+  // same list accepted them, so they saw the full app shell with an
+  // unexplained error inside it. Nothing on either side reported which
+  // identity had been rejected. These tests pin the behaviour that makes such
+  // a disagreement visible.
+  it("names the identity the server actually saw", () => {
+    const res = forbiddenResponse(requestWithPrincipal("someone@example.com"));
+    expect(res.status).toBe(403);
+    expect(res.jsonBody.signedInAs).toBe("someone@example.com");
+  });
+
+  it("reports the identity verbatim, without lowercasing it", () => {
+    // The allowlist comparison lowercases, but this is a diagnostic: it must
+    // show the exact string so a case- or character-level mismatch (an "I"
+    // read as an "l", say) is visible rather than normalised away.
+    const res = forbiddenResponse(requestWithPrincipal("cIngrey@Autoprotect.net"));
+    expect(res.jsonBody.signedInAs).toBe("cIngrey@Autoprotect.net");
+  });
+
+  it("reports null when the client-principal header never arrived", () => {
+    // A different fault from an unrecognised address, and the distinction is
+    // the whole point: null means SWA did not attach the header at all.
+    const res = forbiddenResponse(requestWithPrincipal(undefined));
+    expect(res.jsonBody.signedInAs).toBeNull();
+  });
+
+  it("reports null when the header is present but unparseable", () => {
+    const res = forbiddenResponse(requestWithHeader("x-ms-client-principal", "not-base64-json"));
+    expect(res.jsonBody.signedInAs).toBeNull();
+  });
+
+  it("carries ONLY error and signedInAs, never the rest of the principal", () => {
+    // Guards against this growing into a principal dump. userId and userRoles
+    // are in the header and must not be echoed — the caller's own email is
+    // information they already have, their object id is not something this
+    // endpoint has any reason to hand back.
+    const res = forbiddenResponse(requestWithPrincipal("someone@example.com"));
+    expect(Object.keys(res.jsonBody).sort()).toEqual(["error", "signedInAs"]);
+    expect(JSON.stringify(res.jsonBody)).not.toContain("u1");
+    expect(JSON.stringify(res.jsonBody)).not.toContain("authenticated");
+  });
+
+  it("keeps the same error text every staff route returned before", () => {
+    const res = forbiddenResponse(requestWithPrincipal("someone@example.com"));
+    expect(res.jsonBody.error).toBe("Access restricted to approved underwriting staff");
   });
 });

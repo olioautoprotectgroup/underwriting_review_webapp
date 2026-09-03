@@ -1,12 +1,7 @@
 import { app, HttpRequest, HttpResponseInit } from "@azure/functions";
 import { loadDashboardData } from "../lib/data";
-import { isAuthorizedStaff } from "../lib/auth";
+import { forbiddenResponse, isAuthorizedStaff } from "../lib/auth";
 import type { DashboardSummary } from "../lib/types";
-
-const FORBIDDEN: HttpResponseInit = {
-  status: 403,
-  jsonBody: { error: "Access restricted to approved underwriting staff" },
-};
 
 /**
  * The dashboard table's data, projected down to the columns it renders.
@@ -17,7 +12,7 @@ const FORBIDDEN: HttpResponseInit = {
  * explicitly rather than widening the response back out to the whole file.
  */
 export async function getDashboard(request: HttpRequest): Promise<HttpResponseInit> {
-  if (!isAuthorizedStaff(request)) return FORBIDDEN;
+  if (!isAuthorizedStaff(request)) return forbiddenResponse(request);
 
   const { elrCurrent } = loadDashboardData();
   const body: DashboardSummary = {

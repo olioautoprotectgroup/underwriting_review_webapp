@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { isAuthorizedStaff } from "../lib/auth";
+import { forbiddenResponse, isAuthorizedStaff } from "../lib/auth";
 import { CaseRuleError, checkOpenPrecondition } from "../lib/caseRules";
 import {
   fetchActiveCasesForCohort,
@@ -10,11 +10,6 @@ import {
 import { getClientPrincipal } from "../lib/auth";
 import type { CaseWithCurrentState, OpenCaseInput } from "../lib/types";
 
-const FORBIDDEN: HttpResponseInit = {
-  status: 403,
-  jsonBody: { error: "Access restricted to approved underwriting staff" },
-};
-
 export function caseRuleErrorResponse(err: unknown): HttpResponseInit {
   if (err instanceof CaseRuleError) {
     return { status: err.status, jsonBody: { error: err.message } };
@@ -24,13 +19,13 @@ export function caseRuleErrorResponse(err: unknown): HttpResponseInit {
 }
 
 export async function listCases(request: HttpRequest): Promise<HttpResponseInit> {
-  if (!isAuthorizedStaff(request)) return FORBIDDEN;
+  if (!isAuthorizedStaff(request)) return forbiddenResponse(request);
   const cases = await fetchAllCases();
   return { jsonBody: cases };
 }
 
 export async function createCase(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
-  if (!isAuthorizedStaff(request)) return FORBIDDEN;
+  if (!isAuthorizedStaff(request)) return forbiddenResponse(request);
   const actor = getClientPrincipal(request)?.userDetails as string;
 
   const input = (await request.json()) as OpenCaseInput;

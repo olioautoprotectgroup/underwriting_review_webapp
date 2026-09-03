@@ -37,6 +37,42 @@ export function isAuthorizedStaff(request: HttpRequest): boolean {
 }
 
 /**
+ * The 403 every staff-gated route returns, naming the identity **the server
+ * itself saw**.
+ *
+ * This exists because an opaque 403 hid a real bug. A user whose address is on
+ * the allowlist was refused by the API while `App.tsx`'s client-side copy of the
+ * same list accepted them — so they got the full app shell with an unexplained
+ * error inside it, and nothing on either side said which identity had been
+ * rejected. `signedInAs` closes that: the client and server checks can disagree,
+ * and when they do the difference has to be visible.
+ *
+ * `signedInAs: null` is itself the diagnosis — it means `x-ms-client-principal`
+ * never arrived, which is a different fault from an unrecognised address.
+ *
+ * **Not an information leak.** It returns the caller's own identity, taken from
+ * their own auth cookie, to themselves — the same value `App.tsx` already
+ * renders client-side. It exposes nothing about anyone else, and deliberately
+ * carries only this one field rather than the whole principal (a test pins
+ * that), so it cannot drift into dumping `userId` or roles.
+ *
+ * Machine callers do not use this — `dashboard-data.ts` keeps its own 403, since
+ * a writeback failure has no user principal to report.
+ */
+export function forbiddenResponse(request: HttpRequest): {
+  status: number;
+  jsonBody: { error: string; signedInAs: string | null };
+} {
+  return {
+    status: 403,
+    jsonBody: {
+      error: "Access restricted to approved underwriting staff",
+      signedInAs: getClientPrincipal(request)?.userDetails ?? null,
+    },
+  };
+}
+
+/**
  * Authorizes a machine caller (the scheduled Databricks dashboard push) via
  * a shared secret in the `x-writeback-key` header, checked against the
  * DATABRICKS_WRITEBACK_KEY app setting. Constant-time comparison so
